@@ -1,0 +1,71 @@
+{{!--
+  The bottom band: what the deal comes to, and the one button that commits it.
+
+  The wording of the balance is the whole job here. "You owe 568" and "You receive 568" are the
+  same number and opposite situations, so the label changes rather than relying on a sign the
+  player has to interpret.
+--}}
+<footer class="shop-footer">
+
+  <div class="shop-balance">
+    {{#if empty}}
+    <span class="shop-balance-idle">{{localize "sogrom-simple-dnd5e-magic-shop.shop.counterEmpty"}}</span>
+
+    {{else if barter}}
+    {{#if totals.accepted}}
+    <span class="shop-balance-label is-good">
+      <i class="fa-solid fa-check" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.shop.barterAccepted"}}
+    </span>
+    {{#if totals.balanceCp}}
+    <span class="shop-balance-note">
+      {{localize "sogrom-simple-dnd5e-magic-shop.shop.barterOver" amount=totals.balance}}
+    </span>
+    {{/if}}
+    {{else}}
+    <span class="shop-balance-label is-bad">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.shop.barterShort" amount=totals.balance}}
+    </span>
+    {{/if}}
+
+    {{else}}
+    <span class="shop-balance-label">
+      {{#if totals.owed}}
+        {{localize "sogrom-simple-dnd5e-magic-shop.shop.youOwe"}}
+      {{else}}
+        {{localize "sogrom-simple-dnd5e-magic-shop.shop.youReceive"}}
+      {{/if}}
+    </span>
+    {{!-- The tone is computed in the app rather than with an inline conditional: "money owed"
+          and "money coming to you" are two different readings of one figure, and deciding
+          which in the template would put that judgement in two places. --}}
+    {{> shopCoin value=totals.net tone=netTone}}
+    {{/if}}
+
+    {{#unless totals.affordable}}
+    <span class="shop-balance-note is-bad">
+      <i class="fa-solid fa-coins" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.shop.cannotAfford"}}
+    </span>
+    {{/unless}}
+  </div>
+
+  <div class="shop-footer-actions">
+    <button type="button" class="shop-btn" data-action="clearCounter" {{#if empty}}disabled{{/if}}>
+      <i class="fa-solid fa-rotate-left"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.common.clear"}}
+    </button>
+
+    <button type="button" class="shop-btn shop-btn--primary shop-confirm" data-action="confirmTrade"
+            {{#unless canConfirm}}disabled data-tooltip="{{confirmHint}}"{{/unless}}>
+      {{#if settling}}
+      <i class="fa-solid fa-spinner fa-spin-pulse"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.shop.settling"}}
+      {{else}}
+      <i class="fa-solid fa-handshake"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.shop.confirm"}}
+      {{/if}}
+    </button>
+  </div>
+</footer>

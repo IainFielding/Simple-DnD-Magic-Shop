@@ -1,0 +1,26 @@
+# Docs
+docs/
+
+# Dev tooling — not part of the shipped module archive.
+node_modules/
+
+# Test / tooling output
+coverage/
+.vitest/
+
+# Editor / OS cruft
+.DS_Store
+Thumbs.db
+
+# End-to-end harness. The *source* is tracked: it drives a real Foundry install against real
+# content modules and is where the module's trade authority is actually verified. It is never
+# shipped, so being tracked and being released are separate questions. Two things stay out:
+#
+#   config.mjs  absolute paths to one machine's Foundry install and user data
+#   run output  the logs and reports quote item text from content packs
+test-e2e/config.mjs
+test-e2e/*.log
+test-e2e/*.jsonl
+test-e2e/*.html
+# Dropped by shell.mjs and screenshots.mjs when a run fails — a picture of the broken world.
+test-e2e/failure.png

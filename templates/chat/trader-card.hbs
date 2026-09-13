@@ -1,0 +1,31 @@
+{{!--
+  The card the GM posts to open a shop. Rendered by app/chat-card.mjs.
+
+  It is a prompt rather than a report: a portrait, the Trader's own greeting, and one button.
+  The button carries the Trader's id in `data-shop-trader`, which is also the selector the click
+  handler binds to — deliberately specific, so it can never match another module's card.
+
+  Any player may click it; the shop opens for their own assigned character at their own prices,
+  which is why the card says nothing about cost. Two players clicking the same card get two
+  different shops.
+--}}
+<div class="sogrom-shop-card">
+  <header class="sogrom-shop-card-head">
+    <img class="sogrom-shop-card-portrait" src="{{img}}" alt="">
+    <div class="sogrom-shop-card-titles">
+      <span class="sogrom-shop-card-eyebrow">
+        {{localize "sogrom-simple-dnd5e-magic-shop.card.eyebrow"}}
+      </span>
+      <h3 class="sogrom-shop-card-name">{{name}}</h3>
+    </div>
+  </header>
+
+  {{#if greeting}}
+  <p class="sogrom-shop-card-greeting">{{greeting}}</p>
+  {{/if}}
+
+  <button type="button" class="sogrom-shop-card-btn" data-shop-trader="{{traderId}}">
+    <i class="fa-solid fa-scale-balanced"></i>
+    {{localize "sogrom-simple-dnd5e-magic-shop.card.open"}}
+  </button>
+</div>

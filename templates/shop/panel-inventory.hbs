@@ -1,0 +1,38 @@
+{{!--
+  The character's own pack, with what this Trader would pay for each piece.
+
+  Gear the Trader will not take is shown greyed with the reason on hover, rather than hidden. A
+  player who cannot find their sword in the list assumes the module is broken; one who sees it
+  greyed with "This Trader does not deal in these" has learned something about the Trader.
+
+  Equipped items are marked but still sellable — selling the armour you are standing in is a
+  decision a player is allowed to make, and the system itself does not stop them.
+--}}
+<section class="shop-panel shop-panel--pack" data-side="give">
+  <header class="shop-panel-head">
+    <h2>
+      <i class="fa-solid fa-bag-shopping" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.shop.packHeading"}}
+    </h2>
+    <label class="shop-search">
+      <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+      <input type="search" data-shop-search="pack" autocomplete="off"
+             placeholder="{{localize 'sogrom-simple-dnd5e-magic-shop.common.search'}}"
+             aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.common.search'}}">
+    </label>
+    <span class="shop-count" data-shop-count aria-live="polite" aria-atomic="true"></span>
+  </header>
+
+  <div class="shop-panel-body">
+    {{#if pack.length}}
+    <ul class="shop-tiles">
+      {{#each pack}}{{> shopTile}}{{/each}}
+    </ul>
+    {{else}}
+    <div class="shop-empty shop-empty--panel">
+      <i class="fa-solid fa-bag-shopping" aria-hidden="true"></i>
+      <p>{{localize "sogrom-simple-dnd5e-magic-shop.shop.packEmpty"}}</p>
+    </div>
+    {{/if}}
+  </div>
+</section>

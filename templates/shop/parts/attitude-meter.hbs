@@ -1,0 +1,42 @@
+{{!--
+  The Trader's opinion of one character: a red-to-green gradient track with a marker at the
+  attitude, the tier in words, and the raw number.
+
+  The gradient is painted by CSS on `.shop-attitude-track`; only the marker's position is
+  data-driven, as an inline `left` percentage — attitude is already 0-100, so it *is* the
+  percentage, which is the whole reason the scale was chosen.
+
+  `tier` is a word ("Hostile" … "Devoted") rather than decoration: colour alone would carry the
+  reading otherwise, and red-to-green is exactly the axis colour-blind viewers lose.
+
+  Context:
+    attitude   0-100
+    tier       localised tier label
+    gm         true to render the GM's nudge buttons in place of the static readout
+--}}
+<div class="shop-attitude" role="group" aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.attitude.label'}}">
+  {{#if gm}}
+  <button type="button" class="shop-attitude-nudge" data-action="nudgeAttitude" data-delta="-5"
+          aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.attitude.lower'}}">
+    <i class="fa-solid fa-minus"></i>
+  </button>
+  {{/if}}
+
+  <div class="shop-attitude-track"
+       role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{attitude}}"
+       aria-valuetext="{{tier}} ({{attitude}})">
+    <span class="shop-attitude-marker" style="left: {{attitude}}%"></span>
+  </div>
+
+  {{#if gm}}
+  <button type="button" class="shop-attitude-nudge" data-action="nudgeAttitude" data-delta="5"
+          aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.attitude.raise'}}">
+    <i class="fa-solid fa-plus"></i>
+  </button>
+  {{/if}}
+
+  <span class="shop-attitude-readout">
+    <span class="shop-attitude-tier">{{tier}}</span>
+    <span class="shop-attitude-value">{{localize "sogrom-simple-dnd5e-magic-shop.attitude.readout" value=attitude}}</span>
+  </span>
+</div>

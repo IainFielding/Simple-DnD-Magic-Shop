@@ -1,0 +1,1221 @@
+import {
+  MODULE_ID, PHYSICAL_TYPES, PRICING_PRESETS, SETTINGS, normalizeRarity, setting, tpl, t, log
+} from "../config.mjs";
+import { attitudeTier } from "../data/attitude.mjs";
+import { RESTOCK_MODES, daysUntilRestock } from "../data/restock.mjs";
+import {
+  BUDGET_KEYS, budgetTotal, categoryCounts, defaultBudget, filterPool, pickByBudget,
+  rollTableStock, sanitizeBudget
+} from "../data/generate.mjs";
+import { itemPool, poolCounts, poolSources } from "../data/item-index.mjs";
+import { formatCp, priceMultipliers, pricesFor, totalCp } from "../data/pricing.mjs";
+import {
+  createTrader, deleteTrader, duplicateTrader, getTrader, listTraders, pruneRegistry
+} from "../data/registry.mjs";
+import {
+  FILTER_RARITIES, MUNDANE, cpToPriceParts, effectiveValueCp, parsePriceInput
+} from "../data/stock.mjs";
+import {
+  addStockItems, gainSettings, getAttitude, purse, restockTrader, setAttitude, spendFor,
+  stockEntries, stockLine, traderData
+} from "../data/trader.mjs";
+import { ShopShellBase } from "./shell-base.mjs";
+import { yieldTakeoverTo } from "./takeover.mjs";
+import { ShopApp } from "./shop-app.mjs";
+import { postTraderCard } from "./chat-card.mjs";
+
+/**
+ * The GM-facing Trader Manager: the one and only place Traders are created, stocked and
+ * configured. Opened from the module's settings menu or the scene-controls button.
+ *
+ * A rail of Traders down the left, the selected Trader's panes beside it.
+ *
+ * ## Why there is no Save button
+ *
+ * The plan originally called for a working copy committed by Save, modelled on the sister
+ * module's store-config window. That was the right shape *there*, because its inventory is a
+ * single world setting — one object, written atomically. Ours is not: stock is the Trader
+ * actor's embedded Items, and identity is flags on the actor. A working copy over embedded
+ * documents would mean reimplementing create/update/delete diffing, and a GM who spent twenty
+ * minutes stocking a shop could lose all of it to a stray Escape.
+ *
+ * So this behaves like every other Foundry sheet: edits commit on `change` (blur or Enter, not
+ * per keystroke), drops create the item immediately, and removal deletes it. That is also what
+ * makes two GMs with the manager open merely awkward rather than destructive.
+ *
+ * ## The four panes
+ *
+ * Identity is who the Trader is; Stock is what it sells; Trading is how it bargains and when it
+ * restocks; Attitudes is what it thinks of each character. Only the selected pane's context is
+ * built, because the Stock pane's price previews and the Attitudes pane's table are both
+ * per-row work nobody is looking at from the other tabs.
+ */
+export class TraderManagerApp extends ShopShellBase {
+
+  /** @override */
+  static DEFAULT_OPTIONS = {
+    id: `${MODULE_ID}-manager`,
+    window: {
+      title: `${MODULE_ID}.manager.title`,
+      icon: "fa-solid fa-shop"
+    },
+    actions: {
+      createTrader: TraderManagerApp.#onCreateTrader,
+      duplicateTrader: TraderManagerApp.#onDuplicateTrader,
+      deleteTrader: TraderManagerApp.#onDeleteTrader,
+      selectTrader: TraderManagerApp.#onSelectTrader,
+      selectTab: TraderManagerApp.#onSelectTab,
+      pickPortrait: TraderManagerApp.#onPickPortrait,
+      removeStock: TraderManagerApp.#onRemoveStock,
+      openStockItem: TraderManagerApp.#onOpenStockItem,
+      addFromCompendium: TraderManagerApp.#onAddFromCompendium,
+      toggleGenerator: TraderManagerApp.#onToggleGenerator,
+      generateStock: TraderManagerApp.#onGenerateStock,
+      drawFromTable: TraderManagerApp.#onDrawFromTable,
+      clearStock: TraderManagerApp.#onClearStock,
+      postCard: TraderManagerApp.#onPostCard,
+      openShopAsGM: TraderManagerApp.#onOpenShopAsGM,
+      restockNow: TraderManagerApp.#onRestockNow,
+      resetAttitude: TraderManagerApp.#onResetAttitude,
+      clearCategories: TraderManagerApp.#onClearCategories
+    }
+  };
+
+  /**
+   * Three parts, so the rail can be redrawn without the icon-heavy stock table and vice versa.
+   * Each part renders exactly one root element; the grid that arranges them is on the window's
+   * own element (see the `:has(.shop-rail)` rules in shop.css).
+   * @override
+   */
+  static PARTS = {
+    topbar: { template: tpl("manager/topbar.hbs") },
+    rail: { template: tpl("manager/rail.hbs"), scrollable: [""] },
+    pane: { template: tpl("manager/pane.hbs"), scrollable: [""] }
+  };
+
+  /** The panes, in tab order. */
+  static TABS = [
+    { id: "identity", icon: "fa-solid fa-user-tie", ready: true },
+    { id: "stock", icon: "fa-solid fa-boxes-stacked", ready: true },
+    { id: "trading", icon: "fa-solid fa-scale-balanced", ready: true },
+    { id: "attitudes", icon: "fa-solid fa-face-smile", ready: true }
+  ];
+
+  /** Id of the Trader on screen, or null for the empty state. */
+  #selected = null;
+
+  /** Which pane is showing. */
+  #tab = "identity";
+
+  /** Whether the drag-and-drop listeners are attached; the root element persists. */
+  #dndWired = false;
+
+  /**
+   * The generator panel's own state, held on the instance so it survives the re-render that
+   * follows each generation run. Collapsed by default, and the item pool is only built once it
+   * is opened — walking every compendium takes a noticeable moment and most visits to the Stock
+   * tab are to edit a row, not to generate.
+   */
+  #generator = {
+    open: false,
+    budget: defaultBudget(),
+    maxValue: "",
+    maxDenom: "gp",
+    packs: [],
+    categories: [],
+    tableId: "",
+    draws: 5
+  };
+
+  /**
+   * Which of the system's config maps holds the subtypes for each item type.
+   *
+   * The two levels matter: dnd5e has six physical item *types*, and neither "armour" nor
+   * "musical instrument" is among them — armour is `equipment` with a subtype, a lute is a
+   * `tool` with a subtype of `music`. Without the second level a GM cannot ask for either.
+   *
+   * `container` is absent deliberately: its subtypes are backpack/chest sorts of thing, which
+   * nobody generates a shop by.
+   */
+  static SUBTYPE_SOURCES = {
+    weapon: "weaponTypes",
+    equipment: "equipmentTypes",
+    consumable: "consumableTypes",
+    tool: "toolTypes",
+    loot: "lootTypes"
+  };
+
+  /* -------------------------------------------- */
+  /*  Launching                                   */
+  /* -------------------------------------------- */
+
+  /**
+   * Open the manager, bringing an existing window forward rather than opening a second.
+   *
+   * Two entry points reach this (the settings menu and the toolbar button) and a GM can click
+   * either while the other's window is up. Two copies of a live-editing window over the same
+   * documents is a race nobody needs.
+   * @returns {TraderManagerApp}
+   */
+  static launch() {
+    const existing = foundry.applications.instances.get(`${MODULE_ID}-manager`);
+    if ( existing ) {
+      existing.bringToFront?.();
+      return existing;
+    }
+    const app = new this();
+    app.render({ force: true });
+    return app;
+  }
+
+  /* -------------------------------------------- */
+  /*  Context                                     */
+  /* -------------------------------------------- */
+
+  /** @override */
+  async _prepareContext(options) {
+    const context = await super._prepareContext(options);
+    const traders = listTraders();
+
+    // A Trader deleted from the sidebar while the manager was open leaves a stale selection.
+    if ( this.#selected && !traders.some(a => a.id === this.#selected) ) this.#selected = null;
+    if ( !this.#selected && traders.length ) this.#selected = traders[0].id;
+
+    const trader = this.#selected ? getTrader(this.#selected) : null;
+
+    return Object.assign(context, {
+      traders: traders.map(actor => this.#railEntry(actor)),
+      hasTraders: traders.length > 0,
+      trader: trader ? this.#traderContext(trader) : null,
+      // The selected pane's own view model, spread at the **top level** beside `trader` rather
+      // than inside it.
+      //
+      // This was the shape of three separate bugs. `#traderContext`'s return value *becomes*
+      // `context.trader`, so anything merged into it landed at `trader.rows`, `trader.buyFilter`,
+      // `trader.attitudes` — while the templates read `rows`, `buyFilter`, `attitudes`. Handlebars
+      // resolves a missing key to undefined in silence, so every one of them rendered its
+      // surrounding markup perfectly and filled it with nothing.
+      //
+      // Splitting them apart removes the ambiguity: `trader` is who the Trader *is*, and
+      // everything else on the context is what this pane needs to draw. A view model is not a
+      // property of the Trader and should never have been living inside one.
+      ...(trader ? await this.#paneContext(trader) : {}),
+      tabs: this.constructor.TABS.map(tab => ({
+        ...tab,
+        label: t(`manager.tab.${tab.id}`),
+        active: tab.id === this.#tab
+      })),
+      tab: this.#tab
+    });
+  }
+
+  /** One rail row: enough to identify a Trader at a glance without loading its stock. */
+  #railEntry(actor) {
+    const entries = stockEntries(actor);
+    return {
+      id: actor.id,
+      name: actor.name,
+      img: actor.img,
+      active: actor.id === this.#selected,
+      stockCount: entries.length,
+      purse: formatCp(this.#purseCp(actor))
+    };
+  }
+
+  /** A Trader's own purse in copper, for the rail and the identity pane. */
+  #purseCp(actor) {
+    return totalCp(purse(actor));
+  }
+
+  /**
+   * Who the Trader is: the fields every pane's header and the rail need.
+   *
+   * Identity only. Whatever the *selected pane* needs to draw belongs in {@link #paneContext},
+   * at the top level of the render context — see the note there.
+   */
+  #traderContext(actor) {
+    const data = traderData(actor);
+    const base = {
+      id: actor.id,
+      name: actor.name,
+      img: actor.img,
+      greeting: data.greeting,
+      startingAttitude: data.startingAttitude,
+      currency: Object.entries(CONFIG.DND5E.currencies).map(([key, config]) => ({
+        key,
+        label: config.abbreviation ?? key,
+        value: purse(actor)[key] ?? 0
+      })),
+      purse: formatCp(this.#purseCp(actor))
+    };
+    return base;
+  }
+
+  /**
+   * Everything the selected pane needs, and nothing the others do.
+   *
+   * Built per pane rather than all at once because each is real work nobody is looking at from
+   * the other tabs: the stock pane prices every row, the attitudes pane prices every character,
+   * and the generator walks every compendium in the world.
+   * @param {object} actor
+   * @returns {Promise<object>}
+   */
+  async #paneContext(actor) {
+    const data = traderData(actor);
+    switch ( this.#tab ) {
+      case "stock":
+        return {
+          ...this.#stockContext(actor),
+          generator: await this.#generatorContext()
+        };
+      case "trading":
+        return this.#tradingContext(actor, data);
+      case "attitudes":
+        return this.#attitudesContext(actor, data);
+      default:
+        return {};
+    }
+  }
+
+  /**
+   * The Trading pane: what the Trader will buy, when it restocks, and how fast it warms to a
+   * paying customer.
+   */
+  #tradingContext(actor, data) {
+    const filter = data.buyFilter;
+    const restock = data.restock;
+    const gain = data.attitudeGain;
+
+    return {
+      buyFilter: {
+        allowAll: filter.allowAll,
+        types: PHYSICAL_TYPES.map(type => ({
+          value: type,
+          label: game.i18n.localize(CONFIG.Item.typeLabels?.[type] ?? type),
+          checked: filter.types.includes(type)
+        })),
+        rarities: FILTER_RARITIES.map(key => ({
+          value: key,
+          label: t(`rarity.${key === MUNDANE ? "mundane" : key}`),
+          checked: filter.rarities.includes(key)
+        }))
+      },
+      restock: {
+        mode: restock.mode,
+        modes: RESTOCK_MODES.map(mode => ({
+          value: mode,
+          label: t(`manager.trading.restock.${mode}`),
+          selected: mode === restock.mode
+        })),
+        days: restock.days,
+        timed: restock.mode === "time",
+        // Null for a Trader that never restocks on its own, which the template reads as
+        // "nothing to count down to".
+        due: daysUntilRestock(restock, game.time.worldTime)
+      },
+      gain: {
+        // An unset override means "follow the world", and that has to stay distinguishable from
+        // "0 copper per point", which means the drift is off for this Trader specifically.
+        custom: !!gain,
+        cpPerPoint: (gain ?? gainSettings(actor)).cpPerPoint,
+        capPerVisit: (gain ?? gainSettings(actor)).capPerVisit,
+        worldPerPoint: setting(SETTINGS.attitudeGainPerPoint),
+        worldCap: setting(SETTINGS.attitudeGainCap)
+      }
+    };
+  }
+
+  /**
+   * The Attitudes pane: one row per character this Trader has an opinion about.
+   *
+   * Lists every *player* character in the world, not only the ones with a stored attitude —
+   * a GM wanting to warm a Trader to the party should not have to make them shop first to get
+   * a row to edit.
+   */
+  #attitudesContext(actor, data) {
+    const characters = game.actors
+      .filter(a => a.type === "character")
+      .sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang));
+
+    return {
+      attitudes: characters.map(character => {
+        const value = getAttitude(actor, character);
+        const spend = spendFor(actor, character);
+        return {
+          id: character.id,
+          name: character.name,
+          img: character.img,
+          value,
+          tier: attitudeTier(value).label,
+          // "Met" means there is a stored opinion; everyone else is sitting on the default.
+          met: data.attitude[character.id] !== undefined,
+          chaMod: character.system?.abilities?.cha?.mod ?? 0,
+          spent: formatCp(spend.lifetimeCp),
+          multipliers: (() => {
+            const m = priceMultipliers({
+              chaMod: character.system?.abilities?.cha?.mod ?? 0, attitude: value
+            });
+            return { buy: m.buy.toFixed(2), sell: m.sell.toFixed(2) };
+          })()
+        };
+      }),
+      hasCharacters: characters.length > 0
+    };
+  }
+
+  /**
+   * The kinds of item the generator may draw from, as a two-level tree with counts.
+   *
+   * Built from the system's own config maps rather than a list of our own, so it picks up
+   * whatever a content module adds and is localised by dnd5e. Those maps come in two shapes —
+   * `weaponTypes` is `key -> "label"` while `lootTypes` is `key -> {label}` — hence the
+   * normalisation below.
+   *
+   * A type with nothing in the pool is dropped entirely, and a subtype with nothing is dropped
+   * from its group: a list of forty tickable things that would generate nothing is worse than a
+   * short list of things that work.
+   * @param {import("../data/generate.mjs").PoolEntry[]} pool  Already narrowed by pack and price.
+   * @returns {object[]}
+   */
+  #categoryTree(pool) {
+    const counts = categoryCounts(pool);
+    const chosen = new Set(this.#generator.categories);
+    const label = entry => typeof entry === "string" ? entry : (entry?.label ?? "");
+
+    const groups = [];
+    for ( const type of PHYSICAL_TYPES ) {
+      const total = counts[type] ?? 0;
+      if ( !total ) continue;
+
+      const source = CONFIG.DND5E?.[this.constructor.SUBTYPE_SOURCES[type]] ?? {};
+      const subtypes = Object.entries(source)
+        .map(([key, entry]) => ({
+          value: `${type}:${key}`,
+          label: game.i18n.localize(label(entry)),
+          count: counts[`${type}:${key}`] ?? 0,
+          checked: chosen.has(`${type}:${key}`)
+        }))
+        .filter(sub => sub.count > 0)
+        .sort((a, b) => a.label.localeCompare(b.label, game.i18n.lang));
+
+      groups.push({
+        value: type,
+        label: game.i18n.localize(CONFIG.Item.typeLabels?.[type] ?? type),
+        count: total,
+        checked: chosen.has(type),
+        subtypes,
+        hasSubtypes: subtypes.length > 0
+      });
+    }
+    return groups;
+  }
+
+  /**
+   * The generator panel.
+   *
+   * Only builds the item pool when the panel is open, and reports what the pool actually holds
+   * at each rarity beside each input — so a GM asking for three artifacts can see that their
+   * enabled packs contain one, rather than generating and wondering.
+   */
+  async #generatorContext() {
+    const state = this.#generator;
+    if ( !state.open ) return { open: false };
+
+    const pool = await itemPool();
+    const narrowing = {
+      packs: state.packs,
+      maxValueCp: parsePriceInput(state.maxValue, state.maxDenom) ?? 0
+    };
+    // The rarity counts respect the *whole* narrowing including the chosen kinds, so they say
+    // what a run would actually find. The category tree deliberately does not: its own counts
+    // are what tell a GM what ticking something would get them, and they would all read zero the
+    // moment anything was ticked.
+    const filtered = filterPool(pool, { ...narrowing, categories: state.categories });
+    const counts = poolCounts(filtered);
+
+    return {
+      open: true,
+      buckets: BUDGET_KEYS.map(key => ({
+        key,
+        // Our own labels rather than `CONFIG.DND5E.itemRarity`, which is keyed on the system's
+        // camelCase form ("veryRare") while everything here uses the normalised one
+        // ("veryrare"). Mapping between them buys nothing but a mapping to keep in step.
+        label: key ? t(`rarity.${key}`) : t("rarity.mundane"),
+        value: state.budget[key] ?? 0,
+        available: counts[key] ?? 0
+      })),
+      maxValue: state.maxValue,
+      maxDenom: state.maxDenom,
+      denominations: Object.keys(CONFIG.DND5E.currencies).map(d => ({
+        value: d, label: d, selected: d === state.maxDenom
+      })),
+      sources: poolSources(pool).map(source => ({
+        ...source,
+        checked: state.packs.includes(source.id)
+      })),
+      categories: this.#categoryTree(filterPool(pool, narrowing)),
+      anyCategory: state.categories.length === 0,
+      poolSize: filtered.length,
+      total: budgetTotal(state.budget),
+      tables: game.tables.contents
+        .map(table => ({ id: table.id, name: table.name, selected: table.id === state.tableId }))
+        .sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang)),
+      hasTables: game.tables.size > 0,
+      tableId: state.tableId,
+      draws: state.draws
+    };
+  }
+
+  /**
+   * The stock table.
+   *
+   * Prices preview at Charisma +0 / attitude 50 — a stranger with no gift for it — because that
+   * is the one reference point every GM can reason from. Showing the GM their own character's
+   * price would be meaningless, and showing the raw list value would hide the markup the world's
+   * pricing preset applies.
+   */
+  #stockContext(actor) {
+    const multipliers = priceMultipliers({ chaMod: 0, attitude: 50 });
+    const denominations = Object.keys(CONFIG.DND5E.currencies);
+
+    const rows = stockEntries(actor).map(({ id, item, line }) => {
+      const valueCp = effectiveValueCp(item, line);
+      const { buyCp, sellCp } = pricesFor(valueCp, multipliers);
+      const override = line.overrideCp === null ? null : cpToPriceParts(line.overrideCp);
+      return {
+        id,
+        uuid: item.uuid,
+        name: item.name,
+        img: item.img,
+        type: item.type,
+        rarity: normalizeRarity(item.system?.rarity),
+        quantity: item.system?.quantity ?? 0,
+        unlimited: line.unlimited,
+        baseQty: line.baseQty,
+        revealAt: line.revealAt,
+        // An item with no price of its own and no override cannot be sold; the row says so
+        // rather than quietly showing "0 cp" and leaving the GM to wonder.
+        unpriced: valueCp <= 0,
+        overrideValue: override?.value ?? "",
+        overrideDenom: override?.denomination ?? "gp",
+        denominations: denominations.map(d => ({
+          value: d, label: d, selected: d === (override?.denomination ?? "gp")
+        })),
+        previewBuy: valueCp > 0 ? formatCp(buyCp) : "—",
+        previewSell: valueCp > 0 ? formatCp(sellCp) : "—",
+        // Raw copper alongside the formatted strings, so the render suite can compare the two
+        // figures without parsing "1,650 gp 5 sp" back into a number.
+        previewBuyCp: buyCp,
+        previewSellCp: sellCp
+      };
+    });
+
+    return {
+      rows,
+      hasRows: rows.length > 0,
+      // Worded from the Trader's side, matching the column: it buys at the character's sell
+      // multiplier and sells at their buy multiplier.
+      previewNote: t("manager.stock.previewNote", {
+        buys: (multipliers.sell).toFixed(2),
+        sells: (multipliers.buy).toFixed(2)
+      })
+    };
+  }
+
+  /* -------------------------------------------- */
+  /*  Stock sources                               */
+  /* -------------------------------------------- */
+
+  /**
+   * Add stock through the system's own compendium browser.
+   *
+   * `CompendiumBrowser.select` already has search, type tabs, rarity and price filters, source
+   * settings and multi-select. A hand-rolled picker could only ever be a worse version of a
+   * window dnd5e already ships, so this opens theirs, locked to physical item types.
+   */
+  static async #onAddFromCompendium() {
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+
+    const browser = globalThis.dnd5e?.applications?.CompendiumBrowser;
+    if ( !browser?.select ) return void ui.notifications.warn(t("manager.generate.noBrowser"));
+
+    const selected = await browser.select({
+      // `locked` filters are fixed rather than offered: a Trader cannot stock a spell, so
+      // letting the GM switch to the spell tab would only invite a dead end.
+      filters: { locked: { documentClass: "Item", types: new Set(PHYSICAL_TYPES) } },
+      selection: { min: 0, max: null }
+    });
+    if ( !selected?.size ) return;
+
+    // The browser is a Foundry window opened from inside the fullscreen takeover, and closing
+    // it hands focus back to us; nothing to lift here because it has already gone.
+    await this.#addUuids(trader, [...selected]);
+  }
+
+  /** Run the rarity-budget generator. */
+  static async #onGenerateStock() {
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+
+    const state = this.#generator;
+    if ( budgetTotal(state.budget) <= 0 ) {
+      return void ui.notifications.warn(t("manager.generate.emptyBudget"));
+    }
+
+    const pool = filterPool(await itemPool(), {
+      packs: state.packs,
+      categories: state.categories,
+      maxValueCp: parsePriceInput(state.maxValue, state.maxDenom) ?? 0
+    });
+    const { picked, shortfalls } = pickByBudget({ pool, budget: state.budget });
+
+    // Say what could not be found rather than quietly handing back fewer: a GM whose packs hold
+    // two legendary items should be told that, not left to conclude the generator is broken.
+    const gaps = Object.entries(shortfalls);
+    if ( gaps.length ) {
+      ui.notifications.warn(t("manager.generate.shortfall", {
+        detail: gaps.map(([key, n]) => `${n} ${key ? t(`rarity.${key}`) : t("rarity.mundane")}`)
+          .join(", ")
+      }));
+    }
+    if ( !picked.length ) return;
+
+    await this.#addUuids(trader, picked.map(entry => entry.uuid));
+  }
+
+  /** Draw stock from a RollTable. */
+  static async #onDrawFromTable() {
+    const trader = getTrader(this.#selected);
+    const table = game.tables.get(this.#generator.tableId);
+    if ( !trader ) return;
+    if ( !table ) return void ui.notifications.warn(t("manager.generate.noTable"));
+
+    const uuids = await rollTableStock(table, this.#generator.draws);
+    if ( !uuids.length ) return void ui.notifications.warn(t("manager.generate.tableNoItems"));
+    await this.#addUuids(trader, uuids);
+  }
+
+  /**
+   * Add a batch of uuids and report what happened.
+   *
+   * One report line rather than one per item: generating thirty lines would otherwise bury the
+   * screen in notifications.
+   */
+  async #addUuids(trader, uuids) {
+    const { created, raised, failed, rejected } = await addStockItems(trader, uuids);
+    ui.notifications.info(t("manager.generate.added", {
+      created: created.length, raised: raised.length
+    }));
+    if ( rejected.length ) {
+      // Overwhelmingly a roll table that also rolls spells or features. Naming them beats a bare
+      // count, because the GM's next move is to fix the table.
+      log("not stockable, so skipped", rejected);
+      ui.notifications.warn(t("manager.generate.notStockable", {
+        count: rejected.length,
+        names: rejected.slice(0, 3).map(r => r.name).join(", ")
+      }));
+    }
+    if ( failed.length ) {
+      log("stock uuids that could not be resolved", failed);
+      ui.notifications.warn(t("manager.generate.someFailed", { count: failed.length }));
+    }
+    this.#tab = "stock";
+    this.render({ parts: ["rail", "pane"] });
+  }
+
+  /** Empty a Trader's shelves, with a confirmation — this is a lot of work to undo by hand. */
+  static async #onClearStock() {
+    const trader = getTrader(this.#selected);
+    if ( !trader || !trader.items.size ) return;
+
+    const proceed = await foundry.applications.api.DialogV2.confirm({
+      window: { title: t("manager.stock.clearTitle"), icon: "fa-solid fa-trash-can" },
+      content: `<p>${t("manager.stock.clearBody", {
+        count: trader.items.size, name: trader.name
+      })}</p>`,
+      rejectClose: false
+    });
+    if ( !proceed ) return;
+
+    await trader.deleteEmbeddedDocuments("Item", trader.items.map(i => i.id));
+    this.render({ parts: ["rail", "pane"] });
+  }
+
+  /** Drop every kind restriction, so the generator draws from everything again. */
+  static #onClearCategories() {
+    if ( !this.#generator.categories.length ) return;
+    this.#generator.categories = [];
+    this.render({ parts: ["pane"] });
+  }
+
+  static #onToggleGenerator() {
+    this.#generator.open = !this.#generator.open;
+    this.render({ parts: ["pane"] });
+  }
+
+  /* -------------------------------------------- */
+  /*  Rendering                                   */
+  /* -------------------------------------------- */
+
+  /** @override */
+  _onRender(context, options) {
+    super._onRender(context, options);
+    this.#wireDragDrop();
+    this.#wireFields();
+    this.#restoreDetails();
+    this.#restoreFocus();
+  }
+
+  /**
+   * Which collapsible blocks the GM has opened, as of the last render.
+   *
+   * A `<details>` element keeps its open state in the DOM and nowhere else, so a re-render
+   * closes it. That is not a cosmetic problem here: ticking a compendium re-renders the pane to
+   * update the counts, which slammed shut the very list the GM was ticking through — and took
+   * the focus with it, since a control inside a closed block cannot hold focus.
+   *
+   * Captured in {@link _preRender} and reapplied in `_onRender`. Held per element id rather than
+   * as one flag, so a future collapsible needs no new code.
+   * @type {Set<string>}
+   */
+  #openDetails = new Set();
+
+  /**
+   * A selector for the control to put the focus back on after a re-render.
+   *
+   * Same problem, one level down: rebuilding the pane destroys the element that was just
+   * clicked, so the focus falls back to the document and a keyboard user loses their place
+   * mid-list. Recorded on change and restored after the render that follows.
+   * @type {string|null}
+   */
+  #refocus = null;
+
+  /**
+   * Record which collapsible blocks are open, from the live DOM, just before it is replaced.
+   *
+   * This is the second version. The first tracked open state through each block's `toggle`
+   * event, which looks equivalent and is not: `toggle` is queued as a *task*, while a re-render
+   * whose data is already cached completes entirely in *microtasks*. So opening a block and
+   * ticking a box inside it promptly — or doing it from the keyboard — let the re-render finish
+   * before the event arrived, and the block closed anyway. The late event then landed on an
+   * element that had already been thrown away.
+   *
+   * Reading the DOM here instead has no timing to get wrong: whatever is open at the moment the
+   * markup is replaced is, by definition, what the GM had open.
+   * @override
+   */
+  async _preRender(context, options) {
+    await super._preRender(context, options);
+    if ( !this.element ) return;                 // the first render has no previous DOM
+    for ( const details of this.element.querySelectorAll("[data-shop-details]") ) {
+      const id = details.dataset.shopDetails;
+      if ( details.open ) this.#openDetails.add(id);
+      else this.#openDetails.delete(id);
+    }
+  }
+
+  /** Re-open whatever was open before the render. */
+  #restoreDetails() {
+    for ( const details of this.element.querySelectorAll("[data-shop-details]") ) {
+      // A template may render a block open on its own account — the kinds picker does once a
+      // kind is chosen — so an open block is never forced shut here, only closed ones reopened.
+      if ( this.#openDetails.has(details.dataset.shopDetails) ) details.open = true;
+    }
+  }
+
+  /** Put the focus back where it was, if the control still exists. */
+  #restoreFocus() {
+    if ( !this.#refocus ) return;
+    const target = this.element.querySelector(this.#refocus);
+    this.#refocus = null;
+    target?.focus({ preventScroll: true });
+  }
+
+  /**
+   * Accept an item dropped anywhere on the window.
+   *
+   * Wired once: the window's root element survives a re-render, the part contents do not, so
+   * re-wiring per render would stack listeners and add an item once per render since the window
+   * opened.
+   */
+  #wireDragDrop() {
+    if ( this.#dndWired ) return;
+    this.#dndWired = true;
+    const root = this.element;
+    root.addEventListener("dragover", event => {
+      event.preventDefault();
+      root.classList.add("is-dragover");
+    });
+    root.addEventListener("dragleave", event => {
+      // `dragleave` fires on every child boundary crossed, so the highlight would flicker
+      // constantly without checking whether the pointer actually left the window.
+      if ( event.relatedTarget && root.contains(event.relatedTarget) ) return;
+      root.classList.remove("is-dragover");
+    });
+    root.addEventListener("drop", event => this.#onDrop(event));
+  }
+
+  /**
+   * Commit a field on `change` — blur or Enter, not per keystroke.
+   *
+   * Re-wired every render because the inputs are inside the part content, which is rebuilt.
+   * That is safe where the drop listener is not: these are fresh elements each time, so there
+   * is nothing to stack onto.
+   */
+  #wireFields() {
+    for ( const field of this.element.querySelectorAll("[data-shop-field]") ) {
+      field.addEventListener("change", event => this.#onFieldChange(event));
+    }
+  }
+
+  /* -------------------------------------------- */
+  /*  Field commits                               */
+  /* -------------------------------------------- */
+
+  /**
+   * Write one changed field.
+   *
+   * Rows are addressed by `data-` attributes rather than by form-field `name`s. Foundry's form
+   * serialisation runs names through `expandObject`, which treats dots as path separators — and
+   * while an embedded-item id is safe today, the flag path these write into is not, and a
+   * name-based table would quietly become a nested-object bug the first time an id or a key
+   * gained a dot. Reading the row from the DOM sidesteps the question entirely.
+   */
+  async #onFieldChange(event) {
+    const input = event.currentTarget;
+    const field = input.dataset.shopField;
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+
+    // Noted before anything is written, because a write may re-render and destroy this element.
+    this.#refocus = focusSelector(input);
+
+    // Generator inputs belong to neither the Trader nor an item — they are this window's own
+    // scratch state, and they must not write a document. Checked first, because the generator
+    // panel sits inside the Stock pane and would otherwise fall through to the Trader branch.
+    if ( field.startsWith("gen.") ) return this.#commitGeneratorField(field.slice(4), input);
+
+    const itemId = input.closest("[data-item-id]")?.dataset.itemId;
+    if ( itemId ) return this.#commitStockField(trader, itemId, field, input);
+    return this.#commitTraderField(trader, field, input);
+  }
+
+  /**
+   * A generator control. Held on the instance, never persisted: a generation recipe is a
+   * momentary intent, not a Trader's configuration, and storing it would mean a migration for
+   * a field nobody would miss.
+   *
+   * Only the inputs that change what is *available* trigger a re-render — the budget counts do
+   * not, because re-rendering mid-typing would move the focus out of the box being typed in.
+   */
+  async #commitGeneratorField(field, input) {
+    const state = this.#generator;
+    let rerender = false;
+
+    if ( field.startsWith("budget.") ) {
+      const key = field.slice(7);
+      state.budget = sanitizeBudget({ ...state.budget, [key]: input.value });
+      // Reflect the clamp back, so a typed 5000 visibly becomes 200 rather than lying.
+      input.value = state.budget[key];
+      return;
+    }
+
+    switch ( field ) {
+      case "maxValue":
+      case "maxDenom":
+        state[field] = input.value;
+        rerender = true;                     // changes the pool, and the counts beside it
+        break;
+      case "pack": {
+        const id = input.dataset.pack;
+        state.packs = input.checked
+          ? [...new Set([...state.packs, id])]
+          : state.packs.filter(p => p !== id);
+        rerender = true;
+        break;
+      }
+      case "category": {
+        const value = input.dataset.category;
+        if ( input.checked ) {
+          state.categories = [...new Set([...state.categories, value])];
+        } else {
+          // Unticking a whole type also unticks its subtypes. Leaving them behind would mean
+          // the type's box was clear while the generator still only drew from part of it —
+          // a filter doing something the UI no longer shows.
+          state.categories = state.categories.filter(c => c !== value && !c.startsWith(`${value}:`));
+        }
+        rerender = true;
+        break;
+      }
+      case "tableId":
+        state.tableId = input.value;
+        break;
+      case "draws":
+        state.draws = Math.max(1, Math.min(100, Math.round(Number(input.value) || 1)));
+        input.value = state.draws;
+        break;
+      default:
+        log(`unhandled generator field "${field}"`);
+        return;
+    }
+    if ( rerender ) this.render({ parts: ["pane"] });
+  }
+
+  /** An identity field on the Trader itself. */
+  async #commitTraderField(trader, field, input) {
+    switch ( field ) {
+      case "name": {
+        const name = input.value.trim();
+        // An actor with no name is unopenable in the sidebar, so refuse rather than write it.
+        if ( !name ) {
+          input.value = trader.name;
+          return;
+        }
+        await trader.update({ name });
+        break;
+      }
+      case "greeting":
+        await trader.setFlag(MODULE_ID, "greeting", input.value);
+        break;
+      case "startingAttitude":
+        await trader.setFlag(MODULE_ID, "startingAttitude", Number(input.value));
+        break;
+      case "currency": {
+        const denomination = input.dataset.denomination;
+        const amount = Math.max(0, Math.round(Number(input.value) || 0));
+        await trader.update({ [`system.currency.${denomination}`]: amount });
+        break;
+      }
+      case "allowAll":
+        await trader.setFlag(MODULE_ID, "buyFilter.allowAll", input.checked);
+        break;
+      case "filterType":
+      case "filterRarity": {
+        // Read the whole group back rather than patching one entry: a checkbox group is one
+        // decision, and writing it entry by entry would leave the flag half-updated if a
+        // re-render landed in between.
+        const key = field === "filterType" ? "types" : "rarities";
+        const selected = [...this.element.querySelectorAll(`[data-shop-field="${field}"]`)]
+          .filter(box => box.checked)
+          .map(box => box.dataset.value);
+        await trader.setFlag(MODULE_ID, `buyFilter.${key}`, selected);
+        break;
+      }
+      case "restockMode":
+        await trader.setFlag(MODULE_ID, "restock.mode", input.value);
+        break;
+      case "restockDays":
+        await trader.setFlag(MODULE_ID, "restock.days", Number(input.value));
+        break;
+      case "gainCustom":
+        // Switching the override on seeds it from the world's values, so the fields the GM is
+        // about to edit start from what was actually in force rather than from zero.
+        await trader.setFlag(MODULE_ID, "attitudeGain", input.checked
+          ? {
+            cpPerPoint: Number(setting(SETTINGS.attitudeGainPerPoint)) || 0,
+            capPerVisit: Number(setting(SETTINGS.attitudeGainCap)) || 0
+          }
+          : null);
+        break;
+      case "gainPerPoint":
+      case "gainCap": {
+        const current = traderData(trader).attitudeGain ?? gainSettings(trader);
+        const key = field === "gainPerPoint" ? "cpPerPoint" : "capPerVisit";
+        await trader.setFlag(MODULE_ID, "attitudeGain", {
+          ...current, [key]: Math.max(0, Math.round(Number(input.value) || 0))
+        });
+        break;
+      }
+      case "attitude": {
+        const characterId = input.closest("[data-character-id]")?.dataset.characterId;
+        if ( characterId ) await setAttitude(trader, characterId, Number(input.value));
+        break;
+      }
+      default:
+        log(`unhandled trader field "${field}"`);
+        return;
+    }
+    this.render({ parts: ["rail", "pane"] });
+  }
+
+  /** One control on one stock row. */
+  async #commitStockField(trader, itemId, field, input) {
+    const item = trader.items.get(itemId);
+    if ( !item ) return;
+
+    switch ( field ) {
+      case "quantity":
+        await item.update({ "system.quantity": Math.max(0, Math.round(Number(input.value) || 0)) });
+        break;
+      case "unlimited":
+        await item.setFlag(MODULE_ID, "unlimited", input.checked);
+        break;
+      case "baseQty":
+        await item.setFlag(MODULE_ID, "baseQty", Math.max(1, Math.round(Number(input.value) || 1)));
+        break;
+      case "revealAt": {
+        // Blank means "always visible", which is null rather than 0 — 0 is a real threshold
+        // meaning "visible even to a Trader that loathes you".
+        const raw = input.value.trim();
+        await item.setFlag(MODULE_ID, "revealAt", raw === "" ? null : Number(raw));
+        break;
+      }
+      case "overrideValue":
+      case "overrideDenom": {
+        const row = input.closest("[data-item-id]");
+        const value = row.querySelector("[data-shop-field='overrideValue']")?.value;
+        const denomination = row.querySelector("[data-shop-field='overrideDenom']")?.value;
+        await item.setFlag(MODULE_ID, "overrideCp", parsePriceInput(value, denomination));
+        break;
+      }
+      default:
+        log(`unhandled stock field "${field}"`);
+        return;
+    }
+    this.render({ parts: ["rail", "pane"] });
+  }
+
+  /* -------------------------------------------- */
+  /*  Drag and drop                               */
+  /* -------------------------------------------- */
+
+  /**
+   * An item dropped on the window joins the selected Trader's stock.
+   *
+   * Validated as priced physical gear before it lands: a spell or a class dropped from a
+   * compendium would otherwise become a stock line nothing can price. An *unpriced* physical
+   * item is accepted with a warning rather than refused, because a price override is exactly
+   * how a GM sells something the system gives no value — a quest reward, a unique blade.
+   */
+  async #onDrop(event) {
+    event.preventDefault();
+    this.element.classList.remove("is-dragover");
+
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return void ui.notifications.warn(t("manager.stock.dropNoTrader"));
+
+    let data = null;
+    try {
+      data = foundry.applications.ux.TextEditor.implementation.getDragEventData(event);
+    } catch {
+      data = null;
+    }
+    if ( data?.type !== "Item" ) return;
+
+    const item = await Item.implementation.fromDropData(data).catch(() => null);
+    if ( !item ) return void ui.notifications.warn(t("manager.stock.dropNotItem"));
+    if ( !PHYSICAL_TYPES.includes(item.type) ) {
+      return void ui.notifications.warn(t("manager.stock.dropNotPhysical", { name: item.name }));
+    }
+
+    // Routed through the same function the picker, the generator and the API use, rather than
+    // building the item data here. This path used to do its own `toObject()` and quietly skipped
+    // two things that one does: recording where the item came from (without which a receipt has
+    // nothing durable to link) and raising an existing line instead of adding a second row for
+    // the same thing.
+    const { created, raised } = await addStockItems(trader, [item.uuid]);
+    const landed = created[0] ?? raised[0];
+    if ( !landed ) return void ui.notifications.warn(t("manager.stock.dropNotItem"));
+
+    if ( effectiveValueCp(landed, stockLine(landed)) <= 0 ) {
+      ui.notifications.warn(t("manager.stock.dropUnpriced", { name: landed.name }));
+    }
+    this.#tab = "stock";
+    this.render({ parts: ["rail", "pane"] });
+  }
+
+  /* -------------------------------------------- */
+  /*  Actions                                     */
+  /* -------------------------------------------- */
+
+  static async #onCreateTrader() {
+    const actor = await createTrader();
+    if ( !actor ) return;
+    this.#selected = actor.id;
+    this.#tab = "identity";
+    this.render();
+  }
+
+  static async #onDuplicateTrader(_event, target) {
+    const id = target.closest("[data-trader-id]")?.dataset.traderId ?? this.#selected;
+    const actor = await duplicateTrader(id);
+    if ( !actor ) return;
+    this.#selected = actor.id;
+    this.render();
+  }
+
+  static async #onDeleteTrader(_event, target) {
+    const id = target.closest("[data-trader-id]")?.dataset.traderId ?? this.#selected;
+    const trader = getTrader(id);
+    if ( !trader ) return;
+
+    const proceed = await foundry.applications.api.DialogV2.confirm({
+      window: { title: t("manager.delete.title"), icon: "fa-solid fa-trash-can" },
+      content: `<p>${t("manager.delete.body", { name: trader.name })}</p>`,
+      rejectClose: false
+    });
+    if ( !proceed ) return;
+
+    await deleteTrader(id);
+    if ( this.#selected === id ) this.#selected = null;
+    this.render();
+  }
+
+  static #onSelectTrader(_event, target) {
+    const id = target.closest("[data-trader-id]")?.dataset.traderId;
+    if ( !id || id === this.#selected ) return;
+    this.#selected = id;
+    this.render({ parts: ["rail", "pane"] });
+  }
+
+  static #onSelectTab(_event, target) {
+    const tab = target.dataset.tab;
+    if ( !tab || tab === this.#tab ) return;
+    if ( !this.constructor.TABS.find(t2 => t2.id === tab)?.ready ) return;
+    this.#tab = tab;
+    this.render({ parts: ["pane"] });
+  }
+
+  static async #onPickPortrait() {
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+
+    const picker = new foundry.applications.apps.FilePicker.implementation({
+      type: "image",
+      current: trader.img,
+      callback: path => trader.update({ img: path })
+        .then(() => this.render({ parts: ["rail", "pane"] }))
+    });
+
+    // Claimed *before* rendering, not after. `render()` resolves asynchronously, so reaching for
+    // `picker.element` on the next line finds null and the picker opens behind the full-screen
+    // window — which is exactly the bug this replaced. `yieldTakeoverTo` marks the application
+    // and the render watcher finishes the job when the element exists.
+    yieldTakeoverTo(picker);
+    picker.render(true);
+  }
+
+  static async #onRemoveStock(_event, target) {
+    const trader = getTrader(this.#selected);
+    const itemId = target.closest("[data-item-id]")?.dataset.itemId;
+    if ( !trader || !itemId ) return;
+    await trader.deleteEmbeddedDocuments("Item", [itemId]);
+    this.render({ parts: ["rail", "pane"] });
+  }
+
+  static async #onOpenStockItem(_event, target) {
+    const trader = getTrader(this.#selected);
+    const itemId = target.closest("[data-item-id]")?.dataset.itemId;
+    const item = trader?.items.get(itemId);
+    if ( !item ) return;
+    const sheet = item.sheet;
+    yieldTakeoverTo(sheet);
+    sheet.render(true);
+  }
+
+  /* -------------------------------------------- */
+
+  /** Post the selected Trader's card to chat, which is how a shop reaches the players. */
+  static async #onPostCard() {
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+    await postTraderCard(trader.id);
+    ui.notifications.info(t("manager.posted", { name: trader.name }));
+  }
+
+  /**
+   * Open the shop as the GM, to see what the players will see.
+   *
+   * Opens against the GM's own assigned character when they have one, because the whole window
+   * is priced for a specific character and there is nothing sensible to show without one.
+   */
+  static async #onOpenShopAsGM() {
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+    await ShopApp.open({ traderId: trader.id });
+  }
+
+  /** Refill the shelves now, whatever the Trader's restock mode says. */
+  static async #onRestockNow() {
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+    const result = await restockTrader(trader);
+    ui.notifications.info(result.added.length
+      ? t("manager.trading.restocked", { count: result.added.length })
+      : t("manager.trading.nothingToRestock"));
+    this.render({ parts: ["rail", "pane"] });
+  }
+
+  /**
+   * Forget a Trader's opinion of one character, returning them to its starting attitude.
+   *
+   * Deleting the stored entry rather than writing the default into it, so a later change to the
+   * Trader's own starting attitude still applies to them — which is what "forget" should mean.
+   */
+  static async #onResetAttitude(_event, target) {
+    const trader = getTrader(this.#selected);
+    const characterId = target.closest("[data-character-id]")?.dataset.characterId;
+    if ( !trader || !characterId ) return;
+    await trader.unsetFlag(MODULE_ID, `attitude.${characterId}`);
+    await trader.unsetFlag(MODULE_ID, `spend.${characterId}`);
+    this.render({ parts: ["pane"] });
+  }
+
+  /**
+   * Heal the registry on the way out.
+   *
+   * Reading the registry never writes (two clients reading at once would race), so the prune
+   * happens here — the manager is the only place that changes the Trader set, so closing it is
+   * exactly when the stored order is worth reconciling.
+   * @override
+   */
+  async close(options) {
+    await pruneRegistry().catch(err => log("registry prune failed", err));
+    return super.close(options);
+  }
+
+  /** @override */
+  get title() {
+    return t("manager.title");
+  }
+
+  /** Exposed for the pricing pane in M8, which previews against every preset. */
+  static get presets() {
+    return PRICING_PRESETS;
+  }
+
+  /** Exposed for the attitudes pane in M6. */
+  static attitudeOf(trader, character) {
+    return getAttitude(trader, character);
+  }
+}
+
+/* -------------------------------------------- */
+/**
+ * A selector that will find this control again after its element has been rebuilt.
+ *
+ * Identity has to come from the data attributes rather than from the element, because the
+ * element itself does not survive a re-render. A checkbox in a list needs its list key too —
+ * `data-shop-field="category"` alone matches forty of them.
+ * @param {HTMLElement} input
+ * @returns {string|null}
+ */
+function focusSelector(input) {
+  const field = input?.dataset?.shopField;
+  if ( !field ) return null;
+  for ( const key of ["pack", "category", "value", "denomination"] ) {
+    const value = input.dataset[key];
+    if ( value !== undefined ) {
+      return `[data-shop-field="${field}"][data-${key}="${CSS.escape(value)}"]`;
+    }
+  }
+  // A row's controls are unique within their row, which is keyed by the item or character it is.
+  const row = input.closest("[data-item-id], [data-character-id]");
+  const rowId = row?.dataset?.itemId ?? row?.dataset?.characterId;
+  if ( rowId ) {
+    const attr = row.dataset.itemId ? "data-item-id" : "data-character-id";
+    return `[${attr}="${CSS.escape(rowId)}"] [data-shop-field="${field}"]`;
+  }
+  return `[data-shop-field="${field}"]`;
+}

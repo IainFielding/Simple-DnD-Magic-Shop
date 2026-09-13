@@ -1,0 +1,54 @@
+{{!--
+  The Trader list. Each row identifies a Trader at a glance — portrait, name, how many lines it
+  stocks, what is in its purse — so a GM with a dozen shops can find the right one without
+  opening each.
+
+  The row is a button rather than a link: it selects, it does not navigate, and a button is what
+  a keyboard and a screen reader both expect for that.
+--}}
+<nav class="shop-rail" aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.railLabel'}}">
+
+  <div class="shop-rail-head">
+    <h2>{{localize "sogrom-simple-dnd5e-magic-shop.manager.traders"}}</h2>
+    <button type="button" class="shop-btn shop-btn--primary" data-action="createTrader">
+      <i class="fa-solid fa-plus"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.manager.newTrader"}}
+    </button>
+  </div>
+
+  {{#if hasTraders}}
+  <ul class="shop-rail-list">
+    {{#each traders}}
+    <li class="shop-rail-row {{#if active}}is-active{{/if}}" data-trader-id="{{id}}">
+      <button type="button" class="shop-rail-pick" data-action="selectTrader"
+              aria-current="{{#if active}}true{{else}}false{{/if}}">
+        <img class="shop-rail-img" src="{{img}}" alt="">
+        <span class="shop-rail-main">
+          <span class="shop-rail-name">{{name}}</span>
+          <span class="shop-rail-meta">
+            {{localize "sogrom-simple-dnd5e-magic-shop.manager.stockCount" count=stockCount}}
+            <span class="shop-rail-dot" aria-hidden="true">·</span>
+            {{purse}}
+          </span>
+        </span>
+      </button>
+
+      <span class="shop-rail-tools">
+        <button type="button" class="shop-icon-btn" data-action="duplicateTrader"
+                data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.duplicate'}}"
+                aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.duplicate'}}">
+          <i class="fa-solid fa-clone"></i>
+        </button>
+        <button type="button" class="shop-icon-btn shop-icon-btn--danger" data-action="deleteTrader"
+                data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.delete.tooltip'}}"
+                aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.delete.tooltip'}}">
+          <i class="fa-solid fa-trash-can"></i>
+        </button>
+      </span>
+    </li>
+    {{/each}}
+  </ul>
+  {{else}}
+  <p class="shop-rail-empty">{{localize "sogrom-simple-dnd5e-magic-shop.manager.noTraders"}}</p>
+  {{/if}}
+</nav>

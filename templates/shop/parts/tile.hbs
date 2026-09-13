@@ -1,0 +1,49 @@
+{{!--
+  One item tile, shared by all four panels of the shop — the character's pack, the Trader's
+  stock, and the two staging columns. A single partial so an item cannot look like two different
+  things depending on which column it is sitting in.
+
+  **Icon only.** No name, no price under the box: at 72px a name is either clipped to
+  uselessness or tall enough to halve how many items fit on screen, and the hover tooltip
+  carries the full item card anyway. The name still lives on `data-name`, which is what the
+  panel search filters against, and in the button's `aria-label`, which is what a screen reader
+  announces.
+
+  Rarity is a class rather than an inline colour (`rarity-veryrare`), keyed on the normalised
+  rarity from `config.mjs#normalizeRarity` so it matches the shared palette. Colour is never the
+  only cue: the tooltip names the rarity in words.
+
+  Context (one entry from a panel's `tiles`):
+    id, uuid, name, img
+    rarity      normalised key, or "" for mundane gear
+    qty         stock/held count; omitted when 1
+    unlimited   true to show an infinity badge instead of a count
+    price       pre-formatted price string, used in the label rather than on the face
+    staged      how many of this line are currently in the stage
+    blocked     true when the Trader will not trade this at all; the tile is disabled
+    blockedWhy  localised reason, shown on hover — a greyed tile with no explanation is a bug
+                report waiting to happen
+    exhausted   true when every unit is already on the counter. Dimmed but **not** disabled:
+                a disabled button receives no mouse events, and right-click has to reach it to
+                put the item back
+--}}
+<li class="shop-tile{{#if rarity}} rarity-{{rarity}}{{/if}}{{#if staged}} is-staged{{/if}}{{#if blocked}} is-blocked{{/if}}{{#if exhausted}} is-exhausted{{/if}}"
+    data-item-id="{{id}}" data-uuid="{{uuid}}" data-name="{{name}}">
+
+  <button type="button" class="shop-tile-button" data-action="stageLine" data-item-id="{{id}}"
+          {{#if blocked}}disabled{{/if}}
+          {{#if blocked}}data-tooltip="{{blockedWhy}}"{{else}}data-tooltip="{{shopItemTooltip uuid}}"{{/if}}
+          aria-label="{{name}}{{#if price}} — {{price}}{{/if}}{{#if exhaustedNote}} — {{exhaustedNote}}{{/if}}">
+    <img class="shop-tile-img" src="{{img}}" alt="">
+
+    {{#if unlimited}}
+    <span class="shop-tile-badge" aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.stock.unlimited'}}">
+      <i class="fa-solid fa-infinity"></i>
+    </span>
+    {{else if qty}}
+    <span class="shop-tile-badge">{{qty}}</span>
+    {{/if}}
+
+    {{#if staged}}<span class="shop-tile-staged">{{staged}}</span>{{/if}}
+  </button>
+</li>

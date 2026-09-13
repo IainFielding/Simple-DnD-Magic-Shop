@@ -1,0 +1,69 @@
+{{!--
+  The shop's chrome band: who is trading with whom, what each side is carrying, the attitude
+  meter, and the mode toggle. Spans every column of the grid below it.
+
+  Both purses are shown because both matter — the character's is what they can spend, and the
+  Trader's is the ceiling on what it can pay for anything they sell.
+--}}
+<header class="shop-topbar shop-topbar--shop">
+
+  <div class="shop-party">
+    <img class="shop-party-img" src="{{actor.img}}" alt="">
+    <div class="shop-party-main">
+      <span class="shop-party-name">{{actor.name}}</span>
+      {{> shopCoin value=actor.purse label=(localize "sogrom-simple-dnd5e-magic-shop.shop.yourPurse")}}
+    </div>
+  </div>
+
+  <div class="shop-topbar-centre">
+    <div class="shop-mode" role="group" aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.mode'}}">
+      <button type="button" class="shop-mode-btn {{#unless barter}}is-active{{/unless}}"
+              data-action="setMode" data-mode="trade"
+              aria-pressed="{{#unless barter}}true{{else}}false{{/unless}}">
+        <i class="fa-solid fa-coins" aria-hidden="true"></i>
+        {{localize "sogrom-simple-dnd5e-magic-shop.shop.trade"}}
+      </button>
+      <button type="button" class="shop-mode-btn {{#if barter}}is-active{{/if}}"
+              data-action="setMode" data-mode="barter"
+              aria-pressed="{{#if barter}}true{{else}}false{{/if}}">
+        <i class="fa-solid fa-right-left" aria-hidden="true"></i>
+        {{localize "sogrom-simple-dnd5e-magic-shop.shop.barter"}}
+      </button>
+    </div>
+
+    {{> shopAttitude attitude=attitude.value tier=attitude.label gm=false}}
+
+    {{!-- The multipliers in the open, so a player can see *why* the price is what it is
+          rather than suspecting the module of inventing numbers.
+
+          Worded from the **Trader's** side, because it sits under the Trader's attitude meter:
+          the Trader *buys* your goods at the sell multiplier and *sells* to you at the buy
+          multiplier. `multipliers.buy`/`sell` are named from the character's side everywhere in
+          the code, so they cross over here — deliberately, not by mistake. --}}
+    <p class="shop-rate">
+      {{localize "sogrom-simple-dnd5e-magic-shop.shop.rate"
+         buy=multipliers.sellLabel sell=multipliers.buyLabel}}
+    </p>
+  </div>
+
+  <div class="shop-party shop-party--trader">
+    <div class="shop-party-main">
+      <span class="shop-party-name">{{trader.name}}</span>
+      {{> shopCoin value=trader.purse label=(localize "sogrom-simple-dnd5e-magic-shop.shop.traderPurse")}}
+    </div>
+    <img class="shop-party-img" src="{{trader.img}}" alt="">
+  </div>
+
+  <div class="shop-topbar-tools">
+    <button type="button" class="shop-icon-btn" data-action="refresh"
+            data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.refresh'}}"
+            aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.refresh'}}">
+      <i class="fa-solid fa-rotate"></i>
+    </button>
+    {{#if fullscreen}}
+    <button type="button" class="shop-close" data-action="closeShell" aria-label="{{closeLabel}}">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+    {{/if}}
+  </div>
+</header>

@@ -1,0 +1,82 @@
+{{!--
+  The counter: what the character is handing over, and what they are taking.
+
+  **Column order follows the panels either side of it.** Your pack is on the left, so what you
+  give sits on the left of the counter; their shelves are on the right, so what you take sits on
+  the right. Items therefore move inward from the panel they came from, and nothing crosses the
+  window. Changing the panel order in `ShopApp.PARTS` means changing this too.
+
+  In **trade** mode the two columns are independent and both are priced in coin — buying costs,
+  selling pays, and the footer shows the net. A player may do both in one confirmation, because
+  trading the old sword toward the new one is the commonest thing anyone does in a shop.
+
+  In **barter** mode the same two columns are weighed against each other instead, with a coin
+  field to balance the difference.
+--}}
+<section class="shop-panel shop-panel--stage">
+
+  <div class="shop-stage-col">
+    <header class="shop-panel-head shop-panel-head--stage">
+      <h2>{{localize "sogrom-simple-dnd5e-magic-shop.shop.youGive"}}</h2>
+      {{!-- `data-shop-offer-total` is patched in place while coins are typed, so the total moves
+            without the boxes below being rebuilt under the player's cursor. --}}
+      <span class="shop-stage-total" data-shop-offer-total>
+        {{#if barter}}{{totals.offer}}{{else}}{{totals.credit}}{{/if}}
+      </span>
+    </header>
+    <div class="shop-panel-body">
+      {{#if staged.give.length}}
+      <ul class="shop-staged">
+        {{#each staged.give}}{{> shopStagedRow}}{{/each}}
+      </ul>
+      {{else}}
+      <p class="shop-stage-empty">{{localize "sogrom-simple-dnd5e-magic-shop.shop.giveEmpty"}}</p>
+      {{/if}}
+
+      {{#if barter}}
+      {{!-- Coin only belongs on the counter in barter, where it balances an uneven swap. In
+            trade mode the footer's net already says what changes hands.
+
+            One box per coin, each capped at what the character holds of it, so a player offers
+            "3 gold and 5 silver" the way they would say it rather than working out copper. The
+            coins offered are the coins that move. --}}
+      <fieldset class="shop-stage-gold">
+        <legend>{{localize "sogrom-simple-dnd5e-magic-shop.shop.addCoin"}}</legend>
+        <div class="shop-coin-inputs">
+          {{#each coins}}
+          <label class="shop-coin-input {{#unless held}}is-empty{{/unless}}" data-tooltip="{{name}}">
+            <span class="shop-coin-denom">{{label}}</span>
+            <input type="number" min="0" max="{{held}}" step="1" inputmode="numeric"
+                   value="{{#if value}}{{value}}{{/if}}" placeholder="0"
+                   data-shop-coin="{{key}}" aria-label="{{name}}"
+                   {{#unless held}}disabled{{/unless}}>
+            <span class="shop-coin-held">
+              {{localize "sogrom-simple-dnd5e-magic-shop.shop.coinHeld" held=held}}
+            </span>
+          </label>
+          {{/each}}
+        </div>
+        <span class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.shop.addCoinHint"}}</span>
+      </fieldset>
+      {{/if}}
+    </div>
+  </div>
+
+  <div class="shop-stage-col">
+    <header class="shop-panel-head shop-panel-head--stage">
+      <h2>{{localize "sogrom-simple-dnd5e-magic-shop.shop.youTake"}}</h2>
+      <span class="shop-stage-total">
+        {{#if barter}}{{totals.ask}}{{else}}{{totals.cost}}{{/if}}
+      </span>
+    </header>
+    <div class="shop-panel-body">
+      {{#if staged.take.length}}
+      <ul class="shop-staged">
+        {{#each staged.take}}{{> shopStagedRow}}{{/each}}
+      </ul>
+      {{else}}
+      <p class="shop-stage-empty">{{localize "sogrom-simple-dnd5e-magic-shop.shop.takeEmpty"}}</p>
+      {{/if}}
+    </div>
+  </div>
+</section>

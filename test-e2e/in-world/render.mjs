@@ -1,0 +1,606 @@
+/**
+ * Do the windows actually render?
+ *
+ * Nothing else in this harness opens one. The unit tests never touch a template, the syntax and
+ * localisation checks cannot see inside a `.hbs`, and every other suite calls the data layer
+ * directly — so until this file existed, a broken Handlebars expression, a missing partial or a
+ * renamed context field would have sailed through every gate and landed in front of a player.
+ *
+ * Deliberately shallow. This is not a UI test: it asserts that each window renders without
+ * throwing and that the landmarks a person would look for are on screen. What the pixels look
+ * like is a job for eyes.
+ */
+
+const MODULE = "sogrom-simple-dnd5e-magic-shop";
+const PREFIX = "[e2e]";
+
+class Report {
+  cases = [];
+
+  check(name, condition, detail = "") {
+    this.cases.push({ name, pass: !!condition, detail: condition ? "" : String(detail) });
+    return !!condition;
+  }
+
+  fail(name, err) {
+    this.cases.push({ name, pass: false, detail: `${err?.message ?? err}\n${err?.stack ?? ""}` });
+  }
+
+  get summary() {
+    return { total: this.cases.length, failed: this.cases.filter(c => !c.pass).length, cases: this.cases };
+  }
+}
+
+/** Let a render settle. ApplicationV2 renders asynchronously through several awaits. */
+const settle = () => new Promise(resolve => setTimeout(resolve, 250));
+
+/* -------------------------------------------- */
+
+/**
+ * Open the Trader Manager on each of its four tabs.
+ *
+ * Every tab is visited because each builds its own context and its own branch of the template —
+ * a fault in the Attitudes table is invisible while the Identity tab is showing.
+ */
+export async function managerSuite() {
+  const report = new Report();
+  const api = game.modules.get(MODULE)?.api;
+  let trader = null;
+  let app = null;
+
+  try {
+    trader = await api.createTrader({ name: `${PREFIX} Render`, greeting: "Mind the cauldron." });
+    await trader.update({ "system.currency": { pp: 0, gp: 250, ep: 0, sp: 0, cp: 0 } });
+    await trader.createEmbeddedDocuments("Item", [{
+      name: `${PREFIX} Shelf Item`,
+      type: "loot",
+      system: { quantity: 2, price: { value: 8, denomination: "gp" }, rarity: "rare" },
+      flags: { [MODULE]: { unlimited: false, overrideCp: null, revealAt: null, baseQty: 2 } }
+    }]);
+
+    app = api.openManager();
+    await settle();
+
+    const root = app.element;
+    if ( !report.check("the manager renders an element", !!root) ) return report.summary;
+
+    // Select *this suite's* Trader explicitly. The manager opens on whichever Trader is first in
+    // the rail, and the test world is also where GMs make their own by hand — so without this the
+    // assertions below were quietly inspecting somebody's empty "New Trader" and reporting that
+    // its name and stock were wrong.
+    const own = root.querySelector(`[data-trader-id="${trader.id}"] [data-action="selectTrader"]`);
+    if ( !report.check("the suite's own Trader is in the rail", !!own) ) return report.summary;
+    own.click();
+    await settle();
+
+    report.check("its chrome is present", !!root.querySelector(".shop-topbar"));
+    report.check("the Trader rail is present", !!root.querySelector(".shop-rail"));
+    report.check("the new Trader is listed",
+      root.textContent.includes(`${PREFIX} Render`), root.textContent.slice(0, 200));
+    report.check("no raw localisation key leaked into the markup",
+      !root.textContent.includes(MODULE),
+      rawKeys(root));
+
+    /*
+     * Each tab is asserted to have rendered real *controls*, not merely a panel.
+     *
+     * "A panel rendered" is exactly what a context-nesting bug still does: the markup is
+     * perfect and the `{{#each}}` inside it silently iterates nothing. That has now happened
+     * three times — the generator, the kind picker, and the Trading and Attitudes panes — every
+     * one of them invisible to syntax, lint, JSON and localisation checks. So every tab names
+     * something that can only exist if its context actually arrived.
+     */
+    const tabExpectations = {
+      identity: [
+        ["the name field carries the Trader's name",
+          el => el.querySelector('[data-shop-field="name"]')?.value?.includes(PREFIX)],
+        ["the purse offers a slot per denomination",
+          el => el.querySelectorAll('[data-shop-field="currency"]').length >= 3]
+      ],
+      stock: [
+        ["the stock table has a row for the stocked item",
+          el => el.querySelectorAll(".shop-stock-table tbody tr[data-item-id]").length > 0],
+        ["each row offers a quantity and a price override",
+          el => !!el.querySelector('[data-shop-field="quantity"]')
+            && !!el.querySelector('[data-shop-field="overrideValue"]')],
+        // "Buys / sells", from the Trader's side like the shop: what it pays comes first and
+        // must be the smaller figure. Compared in raw copper from the data attributes.
+        ["the price column reads buys-then-sells, lower first",
+          el => {
+            const buys = Number(el.querySelector(".shop-preview-buys")?.dataset.cp);
+            const sells = Number(el.querySelector(".shop-preview-sells")?.dataset.cp);
+            return buys > 0 && sells > 0 && buys < sells;
+          }]
+      ],
+      trading: [
+        ["the buy filter is on by default, which needs its context to have resolved",
+          el => el.querySelector('[data-shop-field="allowAll"]')?.checked === true],
+        ["the restock dropdown is populated",
+          el => el.querySelectorAll('[data-shop-field="restockMode"] option').length >= 3],
+        ["the goodwill override is offered",
+          el => !!el.querySelector('[data-shop-field="gainCustom"]')]
+      ],
+      attitudes: [
+        ["a row per player character",
+          el => el.querySelectorAll("tr[data-character-id]").length > 0],
+        ["each with a slider to set the attitude",
+          el => !!el.querySelector('[data-shop-field="attitude"]')],
+        ["the multipliers read buys-then-sells, lower first, on every row",
+          el => [...el.querySelectorAll("tr[data-character-id]")].every(row => {
+            const figure = cls => Number(
+              row.querySelector(cls)?.textContent.replace(/[^\d.]/g, ""));
+            const buys = figure(".shop-preview-buys");
+            const sells = figure(".shop-preview-sells");
+            return buys > 0 && sells > 0 && buys < sells;
+          })]
+      ]
+    };
+
+    for ( const [tab, expectations] of Object.entries(tabExpectations) ) {
+      const button = root.querySelector(`[data-action="selectTab"][data-tab="${tab}"]`);
+      if ( !report.check(`the ${tab} tab has a button`, !!button) ) continue;
+      button.click();
+      await settle();
+
+      const panel = app.element.querySelector("[role='tabpanel']");
+      if ( !report.check(`the ${tab} tab renders a panel`, !!panel) ) continue;
+      report.check(`the ${tab} tab leaks no raw keys`,
+        !app.element.textContent.includes(MODULE), rawKeys(app.element));
+
+      for ( const [what, test] of expectations ) {
+        // A throwing predicate is a failure, not a crash: an expectation that reaches into a
+        // context field that never arrived should report the tab as broken, not take the run
+        // down with it.
+        let passed = false;
+        try {
+          passed = !!test(app.element);
+        } catch {
+          passed = false;
+        }
+        report.check(`${tab}: ${what}`, passed,
+          "the markup rendered but its context did not arrive");
+      }
+    }
+
+    // Unticking "buys anything" must reveal the lists it hides — the one interaction on the
+    // Trading tab that changes what is on screen.
+    root.querySelector('[data-action="selectTab"][data-tab="trading"]')?.click();
+    await settle();
+    const allowAll = app.element.querySelector('[data-shop-field="allowAll"]');
+    if ( report.check("the buy filter has an allow-all toggle", !!allowAll) ) {
+      allowAll.checked = false;
+      allowAll.dispatchEvent(new Event("change", { bubbles: true }));
+      await settle();
+      report.check("unticking it reveals the item-type list",
+        app.element.querySelectorAll('[data-shop-field="filterType"]').length > 0,
+        "the type list rendered empty");
+      report.check("and the rarity list",
+        app.element.querySelectorAll('[data-shop-field="filterRarity"]').length > 0,
+        "the rarity list rendered empty");
+
+      const restore = app.element.querySelector('[data-shop-field="allowAll"]');
+      restore.checked = true;
+      restore.dispatchEvent(new Event("change", { bubbles: true }));
+      await settle();
+    }
+
+    // The Stock tab's generator builds the whole compendium pool, which is the slowest and most
+    // failure-prone thing the manager does.
+    root.querySelector('[data-action="selectTab"][data-tab="stock"]')?.click();
+    await settle();
+    const generate = app.element.querySelector('[data-action="toggleGenerator"]');
+    if ( report.check("the generator has a toggle", !!generate) ) {
+      generate.click();
+      await new Promise(resolve => setTimeout(resolve, 2500));   // the pool walks every pack
+      report.check("the generator panel renders",
+        !!app.element.querySelector(".shop-generator"),
+        "no .shop-generator after toggling");
+
+      // Every control in the panel is asserted to have actually produced *rows*, not merely to
+      // exist. This is the shape of bug that keeps getting through: a template reading a context
+      // key at the wrong nesting level renders the surrounding markup perfectly and fills it
+      // with nothing, which no syntax, lint, JSON or localisation check can see. An empty
+      // `{{#each}}` is silent by design, so it has to be asserted against explicitly.
+      const rows = selector => app.element.querySelectorAll(selector).length;
+
+      report.check("the rarity buckets have inputs",
+        rows(".shop-generator-bucket input") > 0, "no rarity inputs");
+      report.check("the kind picker has checkboxes to tick",
+        rows('.shop-generator-kinds input[type="checkbox"]') > 0,
+        "the kinds picker rendered with nothing in it");
+      report.check("the kind picker groups them by item type",
+        rows(".shop-kind-group") > 0, "no kind groups");
+      report.check("and offers subtypes beneath at least one type",
+        rows(".shop-kind-subs input") > 0,
+        "no subtypes — armour and musical instruments would be unreachable");
+      report.check("the compendium picker has sources to tick",
+        rows('.shop-generator-packs input[type="checkbox"]') > 0,
+        "the sources picker rendered with nothing in it");
+      report.check("the price ceiling and its denomination render",
+        !!app.element.querySelector('[data-shop-field="gen.maxValue"]')
+        && rows('[data-shop-field="gen.maxDenom"] option') > 0);
+      report.check("the run button is enabled by the default budget",
+        app.element.querySelector('[data-action="generateStock"]')?.disabled === false,
+        "the generate button was disabled with a non-empty default budget");
+
+      // Ticking a filter re-renders the pane to update the counts, which used to slam shut the
+      // very list being ticked through — a `<details>` keeps its open state in the DOM and
+      // nowhere else, so rebuilding the markup closed it.
+      const sources = app.element.querySelector('[data-shop-details="sources"]');
+      if ( report.check("the compendium block is collapsible", !!sources) ) {
+        sources.open = true;
+        const box = sources.querySelector('input[type="checkbox"][data-pack]');
+
+        if ( report.check("it has a compendium to tick", !!box) ) {
+          const pack = box.dataset.pack;
+          box.checked = true;
+          box.dispatchEvent(new Event("change", { bubbles: true }));
+          await settle();
+
+          const after = app.element.querySelector('[data-shop-details="sources"]');
+          report.check("ticking a compendium leaves the block open",
+            after?.open === true, "the block collapsed on the re-render");
+          report.check("and the tick survives the re-render",
+            after?.querySelector(`input[data-pack="${CSS.escape(pack)}"]`)?.checked === true,
+            "the checkbox came back unticked");
+          report.check("and the focus is handed back to it",
+            app.element.ownerDocument.activeElement?.dataset?.pack === pack,
+            `focus went to ${app.element.ownerDocument.activeElement?.tagName}`);
+
+          // Put it back, so the later assertions see an unnarrowed pool.
+          const restore = app.element.querySelector(`input[data-pack="${CSS.escape(pack)}"]`);
+          restore.checked = false;
+          restore.dispatchEvent(new Event("change", { bubbles: true }));
+          await settle();
+        }
+      }
+    }
+  } catch ( err ) {
+    report.fail("managerSuite threw", err);
+  } finally {
+    await app?.close().catch(() => {});
+    if ( trader ) await trader.delete().catch(() => {});
+  }
+  return report.summary;
+}
+
+/* -------------------------------------------- */
+
+/**
+ * Open a shop, stage something, switch to barter, and make sure it all draws.
+ *
+ * Run once per display mode. The two are genuinely different layouts — an unframed element
+ * covering the viewport, versus the same parts inside Foundry's own window chrome — and the
+ * grid that arranges them is keyed off a different selector in each. Testing only the default
+ * would leave whichever mode is not the default to rot, and the default has already been
+ * flipped once.
+ * @param {"windowed"|"fullscreen"} [mode]
+ */
+export async function shopSuite(mode = "windowed") {
+  const report = new Report();
+  const api = game.modules.get(MODULE)?.api;
+  let trader = null;
+  let app = null;
+  let restore = null;
+
+  try {
+    // Set before the window is constructed: the shell reads the setting in its constructor, so
+    // changing it afterwards would have no effect on a window that is already up.
+    restore = game.settings.get(MODULE, "displayMode");
+    await game.settings.set(MODULE, "displayMode", mode);
+    report.check(`[${mode}] the display mode is set`,
+      game.settings.get(MODULE, "displayMode") === mode);
+
+    trader = await api.createTrader({ name: `${PREFIX} Shopfront` });
+    await trader.update({ "system.currency": { pp: 0, gp: 250, ep: 0, sp: 0, cp: 0 } });
+    await trader.createEmbeddedDocuments("Item", [
+      {
+        name: `${PREFIX} Cheap Thing`,
+        type: "loot",
+        system: { quantity: 4, price: { value: 2, denomination: "gp" } },
+        flags: { [MODULE]: { unlimited: false, overrideCp: null, revealAt: null, baseQty: 4 } }
+      },
+      {
+        name: `${PREFIX} Rare Thing`,
+        type: "loot",
+        system: { quantity: 1, price: { value: 30, denomination: "gp" }, rarity: "veryRare" },
+        flags: { [MODULE]: { unlimited: false, overrideCp: null, revealAt: null, baseQty: 1 } }
+      }
+    ]);
+
+    const character = game.actors.find(a => a.name === `${PREFIX} Thog`);
+    if ( !report.check("a shopper exists", !!character) ) return report.summary;
+
+    app = await api.openShop(trader.id, { actor: character });
+    await settle();
+
+    const root = app?.element;
+    if ( !report.check("the shop renders an element", !!root) ) return report.summary;
+
+    // The one thing that genuinely differs between the modes, asserted rather than assumed.
+    if ( mode === "fullscreen" ) {
+      report.check("fullscreen renders unframed",
+        root.classList.contains("sogrom-shop-fullscreen"), [...root.classList].join(" "));
+      report.check("and supplies its own close control",
+        !!root.querySelector('[data-action="closeShell"]'));
+    } else {
+      report.check("windowed renders inside Foundry's frame",
+        root.classList.contains("sogrom-shop-windowed"), [...root.classList].join(" "));
+      report.check("and leaves the close control to Foundry",
+        !root.querySelector('[data-action="closeShell"]'),
+        "the shell drew a second close button inside a framed window");
+      report.check("and the grid is applied to the window content",
+        !!root.querySelector(".window-content .shop-panel--stage"));
+    }
+
+    report.check("the chrome is present", !!root.querySelector(".shop-topbar--shop"));
+    report.check("the attitude meter is present", !!root.querySelector(".shop-attitude-track"));
+
+    // The rate line is worded from the Trader's side — it buys your goods low and sells to you
+    // high — so the "buying" figure must be the smaller one. Asserted on the relationship rather
+    // than exact values, because the no-arbitrage rule guarantees it for every character at
+    // every Trader, and it is the thing that was once shown the wrong way round.
+    const rate = root.querySelector(".shop-rate")?.textContent ?? "";
+    const figures = [...rate.matchAll(/x\s*([\d.]+)/g)].map(m => Number(m[1]));
+    report.check("the rate line shows two multipliers", figures.length === 2, rate.trim());
+    report.check("and the Trader buys lower than it sells",
+      figures.length === 2 && figures[0] < figures[1],
+      `rate line reads "${rate.trim()}"`);
+    report.check("the counter is present", !!root.querySelector(".shop-panel--stage"));
+    report.check("the footer is present", !!root.querySelector(".shop-footer"));
+    report.check("no raw localisation key leaked into the markup",
+      !root.textContent.includes(MODULE), rawKeys(root));
+
+    // The panel order is a deliberate decision — your pack on the left, their shelves on the
+    // right — and it is set by the order the parts are declared, which is easy to undo by
+    // accident when adding a part.
+    const panels = [...root.querySelectorAll(".shop-panel")];
+    const order = panels.map(panel =>
+      panel.classList.contains("shop-panel--pack") ? "pack"
+        : panel.classList.contains("shop-panel--stage") ? "stage"
+          : "stock");
+    report.check("the panels run pack, counter, stock from left to right",
+      JSON.stringify(order) === JSON.stringify(["pack", "stage", "stock"]),
+      order.join(" -> "));
+
+    const tiles = root.querySelectorAll(".shop-panel--stock .shop-tile");
+    report.check("the shelves render tiles", tiles.length === 2, `${tiles.length} tiles`);
+
+    // Icon-only tiles: a name or price rendered under the box would put the layout back.
+    report.check("tiles carry no name or price text",
+      !root.querySelector(".shop-tile-name") && !root.querySelector(".shop-tile-price"));
+    report.check("but keep the name for search and screen readers",
+      [...tiles].every(tile => !!tile.dataset.name && !!tile.querySelector("[aria-label]")));
+
+    // The icon must fit its box — measured, not eyeballed.
+    //
+    // This is here because it went wrong: the icon was a centred grid item sized `height: 100%`
+    // against a row whose height came from the icon, and that circular percentage resolves to
+    // the image's intrinsic size. Foundry item icons are routinely 512px, so they rendered far
+    // larger than the tiles they were supposed to sit in. A rule that *looks* right and is not
+    // deserves a measurement rather than another opinion.
+    const box = tiles[0]?.querySelector(".shop-tile-button")?.getBoundingClientRect();
+    const icon = tiles[0]?.querySelector(".shop-tile-img")?.getBoundingClientRect();
+    if ( report.check("a tile has a box and an icon", !!box && !!icon) ) {
+      report.check("the tile box is the configured size",
+        Math.round(box.width) === Math.round(box.height) && box.width >= 48 && box.width <= 96,
+        `box is ${Math.round(box.width)}x${Math.round(box.height)}`);
+      report.check("the icon fits inside its box rather than overflowing it",
+        icon.width <= box.width + 1 && icon.height <= box.height + 1,
+        `icon ${Math.round(icon.width)}x${Math.round(icon.height)} `
+          + `in a ${Math.round(box.width)}x${Math.round(box.height)} box`);
+      report.check("and the icon is actually visible rather than collapsed",
+        icon.width > 16 && icon.height > 16,
+        `icon is ${Math.round(icon.width)}x${Math.round(icon.height)}`);
+    }
+
+    // The staging columns must not resize with their contents — a layout that reflows while you
+    // are clicking moves the thing you were about to click next.
+    //
+    // Measured on the two **inner** columns, not on the counter as a whole. The counter's outer
+    // width is pinned by the window's own grid, so measuring that passed happily while the two
+    // halves inside it were visibly different sizes. Measure the thing that was moving.
+    const columnWidths = () => [...app.element.querySelectorAll(".shop-stage-col")]
+      .map(col => Math.round(col.getBoundingClientRect().width));
+    const widthsBefore = columnWidths();
+
+    report.check("the counter has two columns", widthsBefore.length === 2,
+      `found ${widthsBefore.length}`);
+    report.check("which start out the same width",
+      widthsBefore[0] === widthsBefore[1], widthsBefore.join(" vs "));
+
+    // Stage one and make sure the counter and footer follow.
+    const button = tiles[0]?.querySelector('[data-action="stageLine"]');
+    if ( report.check("a tile has a stage button", !!button) ) {
+      button.click();
+      await settle();
+      report.check("staging puts a row on the counter",
+        !!app.element.querySelector(".shop-staged-row"));
+      report.check("and the footer shows what is owed",
+        !!app.element.querySelector(".shop-balance .shop-coin"));
+      report.check("and the confirm button is enabled",
+        app.element.querySelector(".shop-confirm")?.disabled === false);
+      const widthsAfter = columnWidths();
+      report.check("staging does not change the counter's column widths",
+        widthsAfter.join() === widthsBefore.join(),
+        `columns went ${widthsBefore.join("/")} -> ${widthsAfter.join("/")} when a row landed`);
+      report.check("and the two columns are still equal",
+        widthsAfter[0] === widthsAfter[1], widthsAfter.join(" vs "));
+    }
+
+    // The counter's columns mirror the panels either side: give on the left next to your pack,
+    // take on the right next to their shelves, so nothing crosses the window.
+    const headings = [...app.element.querySelectorAll(".shop-panel-head--stage h2")]
+      .map(h => h.textContent.trim().toLowerCase());
+    report.check("the counter reads give then take, matching the panels either side",
+      headings.length === 2 && headings[0].includes("give") && headings[1].includes("take"),
+      headings.join(" | "));
+
+    // Right-click puts an item back — the mirror of left-click putting it on the counter.
+    //
+    // Exercised on the one-off item on purpose. Staging its only unit exhausts the line, and
+    // exhaustion used to disable the tile; a disabled button gets no mouse events, so the
+    // right-click that should have put it back did nothing on exactly this tile.
+    const rightClick = element => {
+      const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 });
+      element.dispatchEvent(event);
+      return event;
+    };
+    const rareTile = () => [...app.element.querySelectorAll(".shop-panel--stock .shop-tile")]
+      .find(tile => tile.dataset.name?.includes("Rare Thing"));
+    const stagedRare = () => [...app.element.querySelectorAll(".shop-staged-row")]
+      .some(row => row.textContent.includes("Rare Thing"));
+
+    const rare = rareTile();
+    if ( report.check("the one-off item has a tile", !!rare) ) {
+      rare.querySelector('[data-action="stageLine"]').click();
+      await settle();
+      report.check("staging its only unit puts it on the counter", stagedRare());
+      report.check("and leaves its tile clickable rather than disabled",
+        rareTile()?.querySelector(".shop-tile-button")?.disabled === false,
+        "the exhausted tile was disabled, so right-click could not reach it");
+
+      const event = rightClick(rareTile().querySelector(".shop-tile-button"));
+      await settle();
+      report.check("right-clicking the tile takes it back off the counter", !stagedRare(),
+        "the item was still on the counter after a right-click");
+      report.check("and suppresses the browser's own menu", event.defaultPrevented);
+
+      // Same gesture on the counter row itself.
+      rareTile().querySelector('[data-action="stageLine"]').click();
+      await settle();
+      const row = [...app.element.querySelectorAll(".shop-staged-row")]
+        .find(r => r.textContent.includes("Rare Thing"));
+      if ( report.check("it is back on the counter", !!row) ) {
+        rightClick(row);
+        await settle();
+        report.check("right-clicking the counter row also takes it back", !stagedRare());
+      }
+
+      // Right-clicking something that is not an item must not touch the counter.
+      //
+      // Not asserted on `defaultPrevented`, which an earlier version did: Foundry itself calls
+      // `preventDefault()` on every `contextmenu` event in the game (client/game.mjs), so the
+      // browser's menu never appears anywhere in Foundry and that check could never pass. What
+      // matters is that our handler ignores anything that is not an item.
+      rareTile().querySelector('[data-action="stageLine"]').click();
+      await settle();
+      rightClick(app.element.querySelector(".shop-panel-head"));
+      await settle();
+      report.check("right-clicking outside an item leaves the counter alone", stagedRare(),
+        "a right-click on a panel heading took an item off the counter");
+      rightClick(rareTile().querySelector(".shop-tile-button"));
+      await settle();
+    }
+
+    // Barter renders a different footer and an extra field.
+    app.element.querySelector('[data-action="setMode"][data-mode="barter"]')?.click();
+    await settle();
+    const boxes = [...app.element.querySelectorAll("[data-shop-coin]")];
+    report.check("barter mode offers a box per coin", boxes.length === 5,
+      `found ${boxes.length} coin boxes`);
+
+    // Typing a coin must update the offer and the footer *without* rebuilding the box being typed
+    // in — otherwise focus and caret are lost on every keystroke and tabbing between coins breaks.
+    const coinBox = boxes.find(b => !b.disabled);
+    if ( report.check("at least one coin coinBox is usable", !!coinBox) ) {
+      const coin = coinBox.dataset.shopCoin;
+      const offerBefore = app.element.querySelector("[data-shop-offer-total]")?.textContent.trim();
+      coinBox.focus();
+      coinBox.value = "1";
+      coinBox.dispatchEvent(new Event("input", { bubbles: true }));
+      await settle();
+
+      const same = app.element.querySelector(`[data-shop-coin="${coin}"]`);
+      report.check("typing a coin keeps the same coinBox in place", same === coinBox && coinBox.isConnected);
+      report.check("and keeps the focus in it",
+        app.element.ownerDocument.activeElement === coinBox,
+        `focus went to ${app.element.ownerDocument.activeElement?.tagName}`);
+      report.check("and updates the offer total beside it",
+        app.element.querySelector("[data-shop-offer-total]")?.textContent.trim() !== offerBefore);
+
+      // A figure above the purse is clamped in the coinBox itself, not only at settlement.
+      coinBox.value = "999999999";
+      coinBox.dispatchEvent(new Event("input", { bubbles: true }));
+      await settle();
+      report.check("an amount above the purse is clamped in the coinBox",
+        Number(coinBox.value) < 999999999 && Number(coinBox.value) <= Number(coinBox.max),
+        `coinBox reads ${coinBox.value} with max ${coinBox.max}`);
+    }
+
+    // The world changing under an open shop. A GM restocking a shelf — or another player buying
+    // from it — must show up without the player pressing refresh, and must not throw away what
+    // they have staged or the box they are typing in.
+    const cheapBadge = () => [...app.element.querySelectorAll(".shop-panel--stock .shop-tile")]
+      .find(tile => tile.dataset.name?.includes("Cheap Thing"))
+      ?.querySelector(".shop-tile-badge")?.textContent.trim();
+    const stagedBefore = app.element.querySelectorAll(".shop-staged-row").length;
+    const focusedCoin = app.element.ownerDocument.activeElement?.dataset?.shopCoin;
+    const coinValue = focusedCoin
+      ? app.element.querySelector(`[data-shop-coin="${focusedCoin}"]`)?.value : null;
+
+    await trader.items.find(i => i.name.includes("Cheap Thing")).update({ "system.quantity": 9 });
+    await new Promise(resolve => setTimeout(resolve, 900));
+
+    report.check("an open shop picks up a stock change without being refreshed by hand",
+      cheapBadge() === "9", `the tile's badge reads ${cheapBadge()}`);
+    report.check("and keeps what was staged",
+      app.element.querySelectorAll(".shop-staged-row").length === stagedBefore,
+      `staged rows went ${stagedBefore} -> ${app.element.querySelectorAll(".shop-staged-row").length}`);
+    if ( report.check("a coin box had the focus before the change", !!focusedCoin) ) {
+      const box = app.element.querySelector(`[data-shop-coin="${focusedCoin}"]`);
+      report.check("and the focus is put back in it after the refresh",
+        app.element.ownerDocument.activeElement === box,
+        `focus is on ${app.element.ownerDocument.activeElement?.outerHTML?.slice(0, 80)}`);
+      report.check("with the amount still in it", box?.value === coinValue,
+        `box reads ${box?.value}, was ${coinValue}`);
+    }
+
+    report.check("and still leaks no raw keys",
+      !app.element.textContent.includes(MODULE), rawKeys(app.element));
+  } catch ( err ) {
+    report.fail(`shopSuite (${mode}) threw`, err);
+  } finally {
+    await app?.close().catch(() => {});
+    if ( trader ) await trader.delete().catch(() => {});
+    if ( restore !== null ) await game.settings.set(MODULE, "displayMode", restore);
+  }
+
+  // Prefix every case with the mode, so a failure says which layout broke.
+  for ( const item of report.cases ) {
+    if ( !item.name.startsWith(`[${mode}]`) ) item.name = `[${mode}] ${item.name}`;
+  }
+  return report.summary;
+}
+
+/* -------------------------------------------- */
+
+/**
+ * Pull the raw keys out of some markup, for a failure message.
+ *
+ * A missing localisation key renders as its own path, so the failure is far easier to act on
+ * when the message names the key rather than just saying one was found.
+ */
+function rawKeys(root) {
+  const matches = root.textContent.match(new RegExp(`${MODULE}\\.[A-Za-z0-9_.]+`, "g")) ?? [];
+  return [...new Set(matches)].slice(0, 5).join(", ");
+}
+
+/* -------------------------------------------- */
+
+export async function all() {
+  const suites = {
+    manager: managerSuite,
+    shop: () => shopSuite("windowed"),
+    "shop-fullscreen": () => shopSuite("fullscreen")
+  };
+  const out = {};
+  for ( const [name, fn] of Object.entries(suites) ) {
+    try {
+      out[name] = await fn();
+    } catch ( err ) {
+      out[name] = { total: 1, failed: 1, cases: [{ name, pass: false, detail: String(err) }] };
+    }
+  }
+  return out;
+}

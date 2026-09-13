@@ -1,0 +1,37 @@
+{{!--
+  The manager's chrome band. Spans both grid columns (see `:has(.shop-rail)` in shop.css).
+
+  `fullscreen` comes from the shell base: in windowed mode Foundry draws its own title bar and
+  close button, so ours would be a second one sitting under the first.
+--}}
+<header class="shop-topbar">
+  <div class="shop-topbar-titles">
+    <span class="shop-eyebrow">{{localize "sogrom-simple-dnd5e-magic-shop.manager.eyebrow"}}</span>
+    <h1 class="shop-title">
+      <i class="fa-solid fa-shop" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.manager.title"}}
+    </h1>
+  </div>
+
+  {{#if trader}}
+  {{!-- The two things a GM does *with* a finished Trader, rather than to it: see it as a
+        player would, and hand it to the table. Kept in the chrome because neither belongs to
+        any one tab. --}}
+  <div class="shop-topbar-tools">
+    <button type="button" class="shop-btn" data-action="openShopAsGM">
+      <i class="fa-solid fa-eye"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.manager.preview"}}
+    </button>
+    <button type="button" class="shop-btn shop-btn--primary" data-action="postCard">
+      <i class="fa-solid fa-comment-dots"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.manager.postCard"}}
+    </button>
+  </div>
+  {{/if}}
+
+  {{#if fullscreen}}
+  <button type="button" class="shop-close" data-action="closeShell" aria-label="{{closeLabel}}">
+    <i class="fa-solid fa-xmark"></i>
+  </button>
+  {{/if}}
+</header>

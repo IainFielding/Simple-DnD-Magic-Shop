@@ -1,0 +1,1770 @@
+/* Simple D&D Magic Shop
+   =====================
+
+   Every rule below is scoped under the `.sogrom-shop` root class. That scoping is what keeps
+   this stylesheet out of the rest of Foundry's UI, so always add new selectors as descendants
+   of `.sogrom-shop` rather than styling bare elements or generic class names.
+
+   Two window shapes share these rules, decided by the `displayMode` world setting and applied
+   at launch by `config.mjs#launchWindowOptions`:
+
+     .sogrom-shop-fullscreen   an unframed div covering the viewport. The default, and the
+                               shape the layout is designed for: 1920x1080.
+     .sogrom-shop-windowed     the same content inside Foundry's own draggable frame.
+
+   Theme — "Arcane Midnight", the same system the Simple D&D Character Creator runs on, with the
+   same values, because the two modules are meant to read as one product. Colour carries one
+   meaning and one only: warm (brass, --shop-settled) is something committed, cool (teal,
+   --shop-open) is something still asking for input. Headings are Cinzel, body text Spectral,
+   both self-hosted in fonts.css.
+
+   Layout is designed for 1080p and degrades by reflow rather than by scaling: panels stack and
+   tile grids re-wrap, so a 1280-wide window is cramped but never broken. */
+
+.sogrom-shop {
+  /* --- Semantic colour ------------------------------------------------
+     Warm means settled. Cool means outstanding.
+
+     --shop-settled  brass. A staged line, a completed action, an affordable price.
+     --shop-open     teal. Anything asking for input: the confirm button, the focus ring.
+
+     The two differ in hue *and* in value, so the distinction survives colour blindness rather
+     than resting on red/green discrimination. Neither is ever the only cue. */
+  --shop-settled: #c9a227;
+  --shop-settled-bright: #e3bf4b;
+  --shop-settled-soft: rgba(201, 162, 39, 0.15);
+  --shop-settled-glow: rgba(201, 162, 39, 0.30);
+  --shop-open: #4fb3a8;
+  --shop-open-bright: #6fd0c5;
+  --shop-open-soft: rgba(79, 179, 168, 0.14);
+  --shop-open-glow: rgba(79, 179, 168, 0.32);
+
+  /* --- Surfaces -------------------------------------------------------
+     The fills stay dark and the *edges* do the separating, which is also what WCAG 1.4.11
+     asks for: a component may be bounded by contrast in its border rather than its fill.
+     Two near-black fills cannot be told apart at the brightness Foundry is actually played
+     at, however far apart their hex values look. */
+  --shop-bg: #15161a;
+  --shop-panel: #212429;
+  --shop-panel-2: #2a2e35;
+  /* The sunk bands: the window's chrome and the Trader rail. */
+  --shop-sunk: #0d0e11;
+
+  /* Decoration only — row separators, block dividers. Aims to be visible (~1.8:1 on panel),
+     not to hit the 3:1 component threshold, which at this value reads as a wireframe. */
+  --shop-line: #474d57;
+  /* Structural edges: the boundary of a component or a surface, and control borders.
+     Clears 3:1 on bg, sunk and panel. */
+  --shop-line-2: #656e7b;
+
+  /* Warm parchment against the cool ground. */
+  --shop-text: #d9d5cc;
+  /* Secondary text. Clears WCAG AA (4.5:1) on every surface here, including --shop-panel-2. */
+  --shop-muted: #9a978f;
+  /* Headings and active labels. */
+  --shop-bright: #f2eee5;
+  /* Placeholders and struck-out values — text, so it gets a text colour rather than
+     borrowing a border token: 4.56:1 on --shop-sunk. */
+  --shop-faint: #767b88;
+  /* One semantic red for destructive actions, rejections and unaffordable prices. */
+  --shop-danger: #ec7082;
+  /* One semantic green for a credit — what a sale pays, a balance in the player's favour.
+     Distinct from --shop-settled because "money coming to you" and "chosen" are not the
+     same idea, and a receipt has to show both at once. */
+  --shop-credit: #7fc08a;
+
+  /* --- Item rarity ----------------------------------------------------
+     Taken verbatim from sogrom-dms-toolkit (scripts/lib/itemRarityColours.mjs and the
+     .rarity-color-* rules in its styles/module.css), so an item wears the same colour in the
+     shop as it does on a character sheet. WoW convention: common is ivory, then green, blue,
+     purple, orange, gold.
+
+     Each is an RGB *triple* rather than a colour, so one hue can serve two jobs at two
+     alphas: the toolkit's own low alpha as the tile wash, and a much higher one as the
+     border. A 0.15 border is invisible, and on a 72px tile the border is the primary cue. */
+  --shop-rarity-common: 255, 255, 225;
+  --shop-rarity-uncommon: 0, 255, 0;
+  --shop-rarity-rare: 0, 128, 255;
+  --shop-rarity-veryrare: 153, 51, 255;
+  --shop-rarity-legendary: 255, 128, 0;
+  --shop-rarity-artifact: 255, 225, 0;
+  /* The alphas. `wash` matches the toolkit's row tint; `edge` is ours, for the border. */
+  --shop-rarity-wash: 0.15;
+  --shop-rarity-edge: 0.85;
+
+  /* --- Form -----------------------------------------------------------
+     Square corners are the point: the shop is a merchant's ledger, not a mobile app, and
+     rounding is most of what would make it read as generic dark-mode UI. Single tokens so
+     the decision stays reversible. */
+  --shop-radius: 0px;
+  --shop-radius-pill: 0px;
+
+  /* A faint top-edge highlight stamped into raised surfaces so they read as lit from above. */
+  --shop-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --shop-panel-grad: linear-gradient(180deg, #2a2e35, #1c1f24);
+  --shop-chrome-grad: linear-gradient(180deg, #1b1d22, #101116);
+  /* Heavy and physical, never linear. */
+  --shop-ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --shop-font-heading: 'Cinzel', 'Palatino Linotype', Georgia, serif;
+  --shop-font-body: 'Spectral', 'Palatino Linotype', Georgia, serif;
+
+  /* Tile geometry, as tokens because three panels and the manager's stock table all size to
+     them and must agree. */
+  --shop-tile: 64px;
+  --shop-rail-w: 268px;
+  /* One staging column. Fixed, and wide enough for a long item name plus its price and the
+     unstage button, because these two columns must not change width as things are put on the
+     counter — a layout that reflows while you are clicking is a layout that moves the thing you
+     were about to click next. */
+  --shop-stage-w: 232px;
+
+  color: var(--shop-text);
+  font-family: var(--shop-font-body);
+}
+
+.sogrom-shop *,
+.sogrom-shop *::before,
+.sogrom-shop *::after { box-sizing: border-box; }
+
+/* Strip the inherited list-item margin from every list in our own UI. Foundry's core styling
+   gives `li` a bottom margin and drops it on `:last-child`. In a grid or flex list that is not
+   cosmetic: tracks size to an item's *margin* box, so an uneven last row is the result. */
+.sogrom-shop ul,
+.sogrom-shop ol { margin: 0; padding: 0; list-style: none; }
+.sogrom-shop li { margin: 0; }
+
+.sogrom-shop h1,
+.sogrom-shop h2,
+.sogrom-shop h3 {
+  font-family: var(--shop-font-heading);
+  color: var(--shop-bright);
+  border: none;
+  margin: 0;
+  font-weight: 600;
+}
+
+/* Visually hidden but available to a screen reader. Used for figures whose meaning is carried
+   by an icon, and for the reason a tile is disabled. */
+.sogrom-shop .shop-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------------------------------------------- Fullscreen mode (default)
+
+   Cover the viewport with no window chrome. Scoped to the launch-applied class rather than the
+   base class, so windowed mode can sit inside Foundry's draggable frame without these
+   fixed-position rules dragging it back to fullscreen. */
+.sogrom-shop-fullscreen {
+  position: fixed;
+  /* `inset: 0` alone sizes this to the viewport. `width: 100vw` is *not* equivalent — it
+     includes the scrollbar gutter, so whenever the page behind has a vertical scrollbar the
+     window comes out wider than the space available and the document gains a horizontal
+     scroll. The Trader rail sits flush to the left edge, so that would be visible. */
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: var(--shop-bg);
+  /* Sit above Foundry's window layer (--z-index-window: 100, bumped each time a window is
+     focused) so an open app — the character sheet the shop was launched from, say — cannot
+     peek through. Kept just under the tooltip/notification layers so our own tooltips and
+     ui.notifications still surface over the shop. */
+  z-index: calc(var(--z-index-tooltip, 9999) - 1);
+  /* No outline on the programmatic focus the shell takes to catch Escape. Keyboard users
+     still get focus rings on the controls inside, which is where they are meaningful. */
+  outline: none;
+}
+
+/* Ambience — soft teal auras top and bottom over a faint brass core, the same warm/cool pair
+   the interface runs on. Behind the content (z-index -1 within our own stacking context) so it
+   tints the backdrop without catching pointer events. */
+.sogrom-shop-fullscreen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(79, 179, 168, 0.10), transparent 52%),
+    radial-gradient(100% 60% at 50% 115%, rgba(79, 179, 168, 0.07), transparent 52%),
+    radial-gradient(60% 40% at 50% 50%, rgba(201, 162, 39, 0.035), transparent 70%);
+}
+
+/* A window opened from *inside* the fullscreen shop — the item sheet a tile's content link
+   opens, or the dnd5e Compendium Browser the GM's stock picker can reach. Those render as
+   ordinary ApplicationV2 windows whose z-index is Foundry's inline `_maxZ` (~100s), so our
+   ~9998 layer buries them.
+
+   Lift *that* window rather than lowering ourselves. Lowering the shop would reveal every
+   window, including the character sheet the shop is explicitly sized to cover. `!important`
+   beats the inline z-index Foundry rewrites on render and focus, and gating on the shop being
+   present means the class goes inert the moment the shop closes — it is on someone else's
+   element, so there is nothing of ours left to take it off. The JS that applies
+   `.sogrom-shop-above` lands with the shop window in M5. */
+body:has(.sogrom-shop-fullscreen) .sogrom-shop-above,
+body:has(.sogrom-shop-fullscreen) .application.compendium-browser {
+  z-index: var(--z-index-tooltip, 9999) !important;
+}
+
+/* Dice So Nice appends #dice-box-canvas to <body> and writes an inline z-index equal to
+   Foundry's window counter on each roll — far below our fullscreen layer, so a roll made from
+   inside the shop would be hidden behind it. Windowed mode needs no override: its real Foundry
+   window participates in `_maxZ`, so a roll naturally lands above it. */
+body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
+  z-index: var(--z-index-tooltip, 9999) !important;
+}
+
+/* ---------------------------------------------- Windowed mode */
+
+.sogrom-shop-windowed {
+  background: var(--shop-bg);
+}
+
+.sogrom-shop-windowed .window-content {
+  padding: 0;
+  background: var(--shop-bg);
+  overflow: hidden;
+}
+
+/* ---------------------------------------------- The shell
+
+   Each ApplicationV2 `PART` renders exactly one root element, and those elements are direct
+   children of the window — so the window itself is the grid, rather than a wrapper div inside
+   it. A shell opts into the two-column shape simply by rendering a rail part, which is what
+   `:has(.shop-rail)` keys on; no extra class to remember to add.
+
+   `minmax(0, 1fr)` rather than `1fr` on both axes: a bare `1fr` track has an automatic minimum
+   of its content's size, so one long item name would push the column wider than the window and
+   the whole page would gain a horizontal scrollbar instead of the panel clipping.
+
+   The panels scroll individually (`min-height: 0` plus their own `overflow-y`), so the chrome
+   band stays put and there is never a scrollbar on the window as a whole. */
+
+.sogrom-shop-fullscreen:has(.shop-rail) {
+  display: grid;
+  grid-template-columns: var(--shop-rail-w) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.sogrom-shop-fullscreen > .shop-topbar { grid-column: 1 / -1; }
+
+/* Windowed mode puts the parts inside Foundry's own `.window-content`, so that is the grid. */
+.sogrom-shop-windowed .window-content:has(.shop-rail) {
+  display: grid;
+  grid-template-columns: var(--shop-rail-w) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+}
+
+.sogrom-shop-windowed .window-content > .shop-topbar { grid-column: 1 / -1; }
+
+/* A window being dragged over. The cue is on the whole window because the drop target is the
+   whole window — requiring a GM to hit a particular strip would be needless precision. */
+.sogrom-shop.is-dragover { outline: 2px dashed var(--shop-open); outline-offset: -6px; }
+
+/* ---------------------------------------------- Top bar */
+
+.sogrom-shop .shop-topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: var(--shop-chrome-grad);
+  border-bottom: 1px solid var(--shop-line-2);
+  box-shadow: var(--shop-sheen);
+  flex: 0 0 auto;
+}
+
+.sogrom-shop .shop-topbar-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-right: auto;
+}
+
+.sogrom-shop .shop-eyebrow {
+  font-family: var(--shop-font-heading);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-title {
+  font-size: 1.35rem;
+  line-height: 1.2;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.sogrom-shop .shop-title i { color: var(--shop-settled); font-size: 0.9em; }
+
+.sogrom-shop .shop-close {
+  flex: 0 0 auto;
+  width: 2.2rem;
+  height: 2.2rem;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid var(--shop-line-2);
+  border-radius: var(--shop-radius);
+  color: var(--shop-muted);
+  cursor: pointer;
+  transition: color 120ms var(--shop-ease), border-color 120ms var(--shop-ease);
+}
+
+.sogrom-shop .shop-close:hover {
+  color: var(--shop-bright);
+  border-color: var(--shop-settled);
+}
+
+/* ---------------------------------------------- Buttons */
+
+.sogrom-shop .shop-btn {
+  font-family: var(--shop-font-heading);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  background: var(--shop-panel-grad);
+  border: 1px solid var(--shop-line-2);
+  border-radius: var(--shop-radius);
+  box-shadow: var(--shop-sheen);
+  color: var(--shop-text);
+  cursor: pointer;
+  transition: border-color 120ms var(--shop-ease), color 120ms var(--shop-ease);
+}
+
+.sogrom-shop .shop-btn:hover:not(:disabled) {
+  border-color: var(--shop-open);
+  color: var(--shop-bright);
+}
+
+.sogrom-shop .shop-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sogrom-shop .shop-btn--ghost {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* The one primary action per window — Confirm Trade, Save. Teal because it is the thing still
+   asking for input. */
+.sogrom-shop .shop-btn--primary {
+  background: var(--shop-open-soft);
+  border-color: var(--shop-open);
+  color: var(--shop-bright);
+}
+
+.sogrom-shop .shop-btn--primary:hover:not(:disabled) {
+  background: var(--shop-open-glow);
+  border-color: var(--shop-open-bright);
+}
+
+.sogrom-shop :is(button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--shop-open);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------- The Trader rail */
+
+.sogrom-shop .shop-rail {
+  background: var(--shop-sunk);
+  border-right: 1px solid var(--shop-line-2);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sogrom-shop .shop-rail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--shop-line);
+}
+
+.sogrom-shop .shop-rail-head h2 {
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-rail-empty {
+  padding: 1rem;
+  margin: 0;
+  color: var(--shop-faint);
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+/* ---------------------------------------------- Panes and the empty state */
+
+.sogrom-shop .shop-pane {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+.sogrom-shop .shop-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  text-align: center;
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-empty > i {
+  font-size: 2.75rem;
+  color: var(--shop-line-2);
+}
+
+.sogrom-shop .shop-empty h2 { font-size: 1.1rem; }
+.sogrom-shop .shop-empty p { margin: 0; max-width: 42ch; }
+
+/* ---------------------------------------------- Item tiles
+
+   The grid auto-fills to the tile token, so every panel re-wraps rather than scaling and the
+   same partial looks identical in all four columns. */
+
+/* Icons only — no name, no price under the box.
+   At 64px a name is either clipped to uselessness or tall enough to halve how many items fit on
+   screen, and the hover tooltip carries the whole item card anyway. The name still lives on the
+   tile's `data-name`, which is what the panel search filters against, and in the button's
+   `aria-label`, which is what a screen reader announces.
+
+   `auto-fill` rather than `auto-fit`: with `auto-fit` a panel holding three items would stretch
+   those three across its whole width, so a shelf of three and a shelf of thirty would render at
+   completely different sizes. */
+.sogrom-shop .shop-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--shop-tile));
+  gap: 0.4rem;
+  align-content: start;
+  justify-content: start;
+}
+
+.sogrom-shop .shop-tile {
+  display: block;
+  width: var(--shop-tile);
+  min-width: 0;
+}
+
+/* The box is sized explicitly in both axes rather than by `width: 100%` plus `aspect-ratio`,
+   and `overflow: hidden` means nothing inside it can ever spill out whatever else changes. */
+.sogrom-shop .shop-tile-button {
+  position: relative;
+  display: block;
+  width: var(--shop-tile);
+  height: var(--shop-tile);
+  padding: 0;
+  overflow: hidden;
+  background: var(--shop-panel);
+  /* 2px so the rarity hue has room to read at tile size. */
+  border: 2px solid var(--shop-line);
+  border-radius: var(--shop-radius);
+  cursor: pointer;
+  transition: border-color 120ms var(--shop-ease), transform 120ms var(--shop-ease);
+}
+
+.sogrom-shop .shop-tile-button:hover:not(:disabled) { transform: translateY(-2px); }
+.sogrom-shop .shop-tile-button:disabled { cursor: not-allowed; }
+
+/* Absolutely positioned, which is the whole point.
+   The icon used to be a centred grid item at `width: 100%; height: 100%`. That looks right and
+   is not: `place-items: center` stops a grid item stretching, so the row's height came from the
+   image while the image's height came from the row — a circular percentage that resolves to
+   `auto`, i.e. the file's intrinsic size. Foundry item icons are routinely 512px, so the icon
+   rendered far larger than the box it was supposed to sit in.
+
+   Taking it out of flow with `inset: 0` breaks the cycle: the box is sized by the rule above,
+   the image is sized by the box, and the image can no longer influence the box at all. */
+.sogrom-shop .shop-tile-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border: none;
+  padding: 3px;
+}
+
+/* Stock count, or the infinity glyph for an unlimited line. */
+.sogrom-shop .shop-tile-badge {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  min-width: 1.15rem;
+  padding: 0 0.2rem;
+  font-family: var(--shop-font-heading);
+  font-size: 0.7rem;
+  line-height: 1.25;
+  text-align: center;
+  color: var(--shop-bright);
+  background: rgba(13, 14, 17, 0.92);
+  border: 1px solid var(--shop-line-2);
+}
+
+/* How many of this line are currently staged — top-left, brass, so it cannot be confused
+   with the stock badge opposite. */
+.sogrom-shop .shop-tile-staged {
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  min-width: 1.15rem;
+  padding: 0 0.2rem;
+  font-family: var(--shop-font-heading);
+  font-size: 0.7rem;
+  line-height: 1.25;
+  text-align: center;
+  color: #15161a;
+  background: var(--shop-settled-bright);
+  border: 1px solid var(--shop-settled);
+}
+
+.sogrom-shop .shop-tile.is-blocked { opacity: 0.45; }
+
+/* Everything already on the counter. Dimmed less than a blocked tile and left clickable, because
+   it is not a refusal: right-click still has to reach it to put the item back, and the brass
+   staged badge in its corner says how many are out. */
+.sogrom-shop .shop-tile.is-exhausted .shop-tile-img { opacity: 0.5; }
+.sogrom-shop .shop-tile.is-exhausted .shop-tile-button { cursor: context-menu; }
+.sogrom-shop .shop-tile.is-exhausted .shop-tile-button:hover { transform: none; }
+
+/* Rarity. The wash and the border share one hue at two alphas; see the token block. */
+.sogrom-shop .shop-tile.rarity-common .shop-tile-button {
+  background: rgba(var(--shop-rarity-common), 0.25);
+  border-color: rgba(var(--shop-rarity-common), var(--shop-rarity-edge));
+}
+.sogrom-shop .shop-tile.rarity-uncommon .shop-tile-button {
+  background: rgba(var(--shop-rarity-uncommon), var(--shop-rarity-wash));
+  border-color: rgba(var(--shop-rarity-uncommon), var(--shop-rarity-edge));
+}
+.sogrom-shop .shop-tile.rarity-rare .shop-tile-button {
+  background: rgba(var(--shop-rarity-rare), var(--shop-rarity-wash));
+  border-color: rgba(var(--shop-rarity-rare), var(--shop-rarity-edge));
+}
+.sogrom-shop .shop-tile.rarity-veryrare .shop-tile-button {
+  background: rgba(var(--shop-rarity-veryrare), var(--shop-rarity-wash));
+  border-color: rgba(var(--shop-rarity-veryrare), var(--shop-rarity-edge));
+}
+.sogrom-shop .shop-tile.rarity-legendary .shop-tile-button {
+  background: rgba(var(--shop-rarity-legendary), var(--shop-rarity-wash));
+  border-color: rgba(var(--shop-rarity-legendary), var(--shop-rarity-edge));
+}
+.sogrom-shop .shop-tile.rarity-artifact .shop-tile-button {
+  background: rgba(var(--shop-rarity-artifact), 0.30);
+  border-color: rgba(var(--shop-rarity-artifact), var(--shop-rarity-edge));
+}
+
+/* A staged tile's brass edge outranks its rarity edge: what the player is doing right now
+   matters more than what the item is. */
+.sogrom-shop .shop-tile.is-staged .shop-tile-button { border-color: var(--shop-settled-bright); }
+
+/* ---------------------------------------------- Coin */
+
+.sogrom-shop .shop-coin {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-family: var(--shop-font-heading);
+  white-space: nowrap;
+}
+
+.sogrom-shop .shop-coin > i { color: var(--shop-settled); font-size: 0.85em; }
+.sogrom-shop .shop-coin.is-good .shop-coin-value { color: var(--shop-credit); }
+.sogrom-shop .shop-coin.is-bad .shop-coin-value { color: var(--shop-danger); }
+.sogrom-shop .shop-coin.is-dim { opacity: 0.55; }
+
+/* ---------------------------------------------- Attitude meter */
+
+.sogrom-shop .shop-attitude {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.sogrom-shop .shop-attitude-track {
+  position: relative;
+  width: clamp(140px, 18vw, 280px);
+  height: 8px;
+  border: 1px solid var(--shop-line-2);
+  border-radius: var(--shop-radius-pill);
+  /* Red through amber to green. The tier word beside it carries the same reading for anyone
+     who cannot separate the ends. */
+  background: linear-gradient(90deg, #b4384a 0%, #c98a2a 38%, #b9b93a 58%, #5aa663 100%);
+}
+
+.sogrom-shop .shop-attitude-marker {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: var(--shop-bright);
+  border: 1px solid #15161a;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+  transition: left 220ms var(--shop-ease);
+}
+
+.sogrom-shop .shop-attitude-readout {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.sogrom-shop .shop-attitude-tier {
+  font-family: var(--shop-font-heading);
+  font-size: 0.85rem;
+  color: var(--shop-bright);
+}
+
+.sogrom-shop .shop-attitude-value {
+  font-size: 0.7rem;
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-attitude-nudge {
+  width: 1.6rem;
+  height: 1.6rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--shop-line-2);
+  border-radius: var(--shop-radius);
+  color: var(--shop-muted);
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.sogrom-shop .shop-attitude-nudge:hover {
+  color: var(--shop-bright);
+  border-color: var(--shop-settled);
+}
+
+/* ---------------------------------------------- Trader rail rows */
+
+.sogrom-shop .shop-rail-list { padding: 0.4rem; display: flex; flex-direction: column; gap: 0.25rem; }
+
+.sogrom-shop .shop-rail-row {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid transparent;
+  border-radius: var(--shop-radius);
+}
+
+.sogrom-shop .shop-rail-row:hover { border-color: var(--shop-line); background: var(--shop-panel); }
+
+/* The selected Trader is brass-edged: it is the decision the GM has committed to. */
+.sogrom-shop .shop-rail-row.is-active {
+  border-color: var(--shop-settled);
+  background: var(--shop-settled-soft);
+}
+
+/* Foundry's core stylesheet puts `display: flex; justify-content: center` on **every**
+   `button`, so any button used as a list row centres its contents unless it says otherwise.
+   `text-align: left` does not help: the children are flex items, and flex alignment wins.
+   Every button in this module that reads as a row rather than as a button therefore has to set
+   `justify-content: flex-start` explicitly. */
+.sogrom-shop .shop-rail-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.5rem;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--shop-font-body);
+}
+
+.sogrom-shop .shop-rail-img {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border: 1px solid var(--shop-line-2);
+  border-radius: var(--shop-radius);
+}
+
+.sogrom-shop .shop-rail-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+}
+
+.sogrom-shop .shop-rail-name {
+  font-family: var(--shop-font-heading);
+  font-size: 0.85rem;
+  color: var(--shop-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sogrom-shop .shop-rail-meta { font-size: 0.7rem; color: var(--shop-muted); }
+.sogrom-shop .shop-rail-dot { margin: 0 0.25rem; }
+
+/* The row tools stay hidden until the row is hovered or holds focus. Two destructive-ish
+   buttons on every row of a list is visual noise, but they must still be keyboard-reachable —
+   hence `:focus-within` alongside `:hover`, rather than `display: none`. */
+.sogrom-shop .shop-rail-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding-right: 0.3rem;
+  opacity: 0;
+  transition: opacity 120ms var(--shop-ease);
+}
+
+.sogrom-shop .shop-rail-row:hover .shop-rail-tools,
+.sogrom-shop .shop-rail-row:focus-within .shop-rail-tools { opacity: 1; }
+
+/* ---------------------------------------------- Icon buttons */
+
+.sogrom-shop .shop-icon-btn {
+  width: 1.7rem;
+  height: 1.7rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--shop-radius);
+  color: var(--shop-muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.sogrom-shop .shop-icon-btn:hover { color: var(--shop-bright); border-color: var(--shop-line-2); }
+.sogrom-shop .shop-icon-btn--danger:hover { color: var(--shop-danger); border-color: var(--shop-danger); }
+
+/* ---------------------------------------------- Tabs */
+
+.sogrom-shop .shop-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--shop-line-2);
+}
+
+.sogrom-shop .shop-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.9rem;
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  color: var(--shop-muted);
+  cursor: pointer;
+  font-family: var(--shop-font-heading);
+  font-size: 0.8rem;
+  /* Pull the active tab's border down over the strip's own, so the two read as one edge. */
+  margin-bottom: -1px;
+}
+
+.sogrom-shop .shop-tab:hover:not(:disabled) { color: var(--shop-bright); }
+.sogrom-shop .shop-tab:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.sogrom-shop .shop-tab.is-active {
+  color: var(--shop-bright);
+  background: var(--shop-panel);
+  border-color: var(--shop-line-2);
+  border-bottom: 1px solid var(--shop-panel);
+}
+
+/* ---------------------------------------------- Forms */
+
+.sogrom-shop .shop-form { display: flex; flex-direction: column; gap: 1.5rem; max-width: 780px; }
+
+.sogrom-shop .shop-field { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.sogrom-shop .shop-field-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--shop-font-heading);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-field-value { font-size: 0.95rem; color: var(--shop-settled); letter-spacing: 0; }
+.sogrom-shop .shop-field-hint { font-size: 0.78rem; color: var(--shop-faint); line-height: 1.35; }
+
+.sogrom-shop :is(input[type="text"], input[type="number"], textarea, select) {
+  background: var(--shop-sunk);
+  border: 1px solid var(--shop-line-2);
+  border-radius: var(--shop-radius);
+  color: var(--shop-text);
+  font-family: var(--shop-font-body);
+  padding: 0.3rem 0.45rem;
+}
+
+.sogrom-shop :is(input, textarea, select):disabled { opacity: 0.4; }
+.sogrom-shop textarea { resize: vertical; }
+
+.sogrom-shop .shop-fieldset {
+  border: 1px solid var(--shop-line);
+  border-radius: var(--shop-radius);
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sogrom-shop .shop-fieldset legend {
+  font-family: var(--shop-font-heading);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0 0.4rem;
+}
+
+.sogrom-shop .shop-currency { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+
+.sogrom-shop .shop-currency-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-family: var(--shop-font-heading);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-currency-slot input { width: 6.5rem; }
+
+/* ---------------------------------------------- Identity */
+
+.sogrom-shop .shop-identity { display: flex; gap: 1.25rem; align-items: flex-start; }
+
+.sogrom-shop .shop-portrait {
+  position: relative;
+  /* `display: block` rather than the flex Foundry gives every button, so the image inside is a
+     plain block filling it rather than a centred flex item. */
+  display: block;
+  width: 132px;
+  height: 132px;
+  flex: 0 0 auto;
+  padding: 0;
+  background: var(--shop-sunk);
+  border: 1px solid var(--shop-line-2);
+  border-radius: var(--shop-radius);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.sogrom-shop .shop-portrait img { width: 100%; height: 100%; object-fit: cover; border: none; }
+
+.sogrom-shop .shop-portrait-hint {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 0.2rem;
+  background: rgba(13, 14, 17, 0.82);
+  color: var(--shop-bright);
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: opacity 120ms var(--shop-ease);
+}
+
+.sogrom-shop .shop-portrait:hover .shop-portrait-hint,
+.sogrom-shop .shop-portrait:focus-visible .shop-portrait-hint { opacity: 1; }
+
+.sogrom-shop .shop-identity-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1rem; }
+
+/* ---------------------------------------------- Stock table */
+
+.sogrom-shop .shop-stock { display: flex; flex-direction: column; gap: 0.85rem; }
+
+.sogrom-shop .shop-dropzone-hint {
+  margin: 0;
+  padding: 0.55rem 0.8rem;
+  border: 1px dashed var(--shop-line-2);
+  border-radius: var(--shop-radius);
+  color: var(--shop-muted);
+  font-size: 0.82rem;
+}
+
+.sogrom-shop .shop-preview-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--shop-faint);
+  line-height: 1.4;
+}
+
+/* The table is allowed to be wider than the pane and scroll inside it; the window never does. */
+.sogrom-shop .shop-stock-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.sogrom-shop .shop-stock-table th {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--shop-line-2);
+  font-family: var(--shop-font-heading);
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+  white-space: nowrap;
+}
+
+.sogrom-shop .shop-stock-table td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--shop-line);
+  vertical-align: middle;
+}
+
+.sogrom-shop .shop-col-item { width: 40%; }
+.sogrom-shop .shop-stock-table input[type="number"] { width: 4.5rem; }
+.sogrom-shop .shop-price-cell,
+.sogrom-shop .shop-qty-cell { display: flex; align-items: center; gap: 0.3rem; }
+.sogrom-shop .shop-price-cell select { width: 4rem; }
+
+/* Same again: a stock row is a row, not a button, whatever element it happens to be. */
+.sogrom-shop .shop-stock-item {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.1rem;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--shop-font-body);
+}
+
+.sogrom-shop .shop-stock-item img {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border: 1px solid var(--shop-line);
+  border-radius: var(--shop-radius);
+}
+
+.sogrom-shop .shop-stock-name { min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.sogrom-shop .shop-stock-item:hover .shop-stock-name { text-decoration: underline; }
+.sogrom-shop .shop-stock-type { font-size: 0.7rem; color: var(--shop-muted); }
+
+/* A row whose item has neither a price nor an override: it cannot be sold, so the row says so
+   rather than quietly showing "0 cp" and leaving the GM to wonder. */
+.sogrom-shop .shop-stock-row.is-unpriced { background: rgba(236, 112, 130, 0.07); }
+.sogrom-shop .shop-stock-row.is-unpriced .shop-col-preview { color: var(--shop-danger); }
+
+.sogrom-shop .shop-col-preview { display: flex; flex-direction: column; line-height: 1.25; white-space: nowrap; }
+/* Named from the Trader's side, matching the "Buys / sells" heading: first what it pays, then
+   what it charges. The charge is brass and full size because it is the figure players see on
+   the shelf; what the Trader pays is the secondary one. */
+.sogrom-shop .shop-preview-buys { color: var(--shop-credit); font-size: 0.75rem; }
+.sogrom-shop .shop-preview-sells { color: var(--shop-settled); }
+
+.sogrom-shop .shop-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: var(--shop-muted);
+  cursor: pointer;
+}
+
+/* Rarity as text colour, for the stock table where a 30px icon carries no border. The same
+   hue as the tile edge, at full strength because this is a foreground colour on a dark ground. */
+.sogrom-shop .shop-rarity-text.rarity-common { color: rgb(var(--shop-rarity-common)); }
+.sogrom-shop .shop-rarity-text.rarity-uncommon { color: rgb(var(--shop-rarity-uncommon)); }
+.sogrom-shop .shop-rarity-text.rarity-rare { color: rgb(var(--shop-rarity-rare)); }
+.sogrom-shop .shop-rarity-text.rarity-veryrare { color: rgb(var(--shop-rarity-veryrare)); }
+.sogrom-shop .shop-rarity-text.rarity-legendary { color: rgb(var(--shop-rarity-legendary)); }
+.sogrom-shop .shop-rarity-text.rarity-artifact { color: rgb(var(--shop-rarity-artifact)); }
+
+/* ---------------------------------------------- Stock tools and the generator */
+
+.sogrom-shop .shop-stock-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.sogrom-shop .shop-stock-tools .shop-dropzone-hint { flex: 1 1 22ch; margin: 0; }
+.sogrom-shop .shop-stock-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+/* A toggle that is currently on. Brass, because it is a state the GM has committed to. */
+.sogrom-shop .shop-btn.is-on {
+  border-color: var(--shop-settled);
+  background: var(--shop-settled-soft);
+  color: var(--shop-bright);
+}
+
+.sogrom-shop .shop-btn--danger:hover:not(:disabled) {
+  border-color: var(--shop-danger);
+  color: var(--shop-danger);
+}
+
+.sogrom-shop .shop-generator {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1rem;
+  background: var(--shop-panel);
+  border: 1px solid var(--shop-line-2);
+  border-radius: var(--shop-radius);
+  box-shadow: var(--shop-sheen);
+}
+
+.sogrom-shop .shop-generator-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.sogrom-shop .shop-generator-head i { color: var(--shop-settled); font-size: 0.85em; }
+
+/* One column per rarity bucket, wrapping rather than shrinking: seven number boxes squeezed
+   onto one line at 1280px would each be too narrow to read a three-digit count in. */
+.sogrom-shop .shop-generator-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 0.5rem;
+}
+
+.sogrom-shop .shop-generator-bucket {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.5rem;
+  background: var(--shop-sunk);
+  border: 1px solid var(--shop-line);
+  border-radius: var(--shop-radius);
+}
+
+/* A bucket the filtered pool cannot fill at all. Dimmed and disabled rather than hidden, so
+   the GM can see *why* nothing generated instead of wondering where the field went. */
+.sogrom-shop .shop-generator-bucket.is-empty { opacity: 0.5; }
+
+.sogrom-shop .shop-generator-label {
+  font-family: var(--shop-font-heading);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-generator-avail { font-size: 0.68rem; color: var(--shop-faint); }
+
+.sogrom-shop .shop-generator-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.9rem;
+}
+
+.sogrom-shop .shop-field--inline { flex: 0 0 auto; }
+.sogrom-shop .shop-generator-pool { margin: 0 auto 0 0; font-size: 0.8rem; color: var(--shop-muted); }
+
+.sogrom-shop .shop-generator-sources summary {
+  cursor: pointer;
+  font-family: var(--shop-font-heading);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-generator-sources summary:hover { color: var(--shop-bright); }
+
+.sogrom-shop .shop-generator-packs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.25rem 1rem;
+  padding-top: 0.5rem;
+}
+
+.sogrom-shop .shop-check--block { font-size: 0.82rem; color: var(--shop-text); }
+
+/* The kind picker: a column per item type, its subtypes indented beneath.
+   `auto-fill` with a real minimum rather than `auto-fit`, so a world with two usable types does
+   not stretch those two across the whole panel. */
+.sogrom-shop .shop-generator-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.75rem 1.25rem;
+  padding-top: 0.5rem;
+}
+
+.sogrom-shop .shop-kind-group { display: flex; flex-direction: column; gap: 0.1rem; }
+
+.sogrom-shop .shop-kind-head {
+  font-family: var(--shop-font-heading);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  color: var(--shop-bright);
+}
+
+/* Indented and ruled, so the subtypes read as belonging to the heading above rather than as
+   siblings of it — the heading is a superset of them, not a peer. */
+.sogrom-shop .shop-kind-subs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-left: 0.55rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid var(--shop-line);
+}
+
+.sogrom-shop .shop-generator-sources summary .shop-generator-avail { margin-left: 0.4rem; }
+
+.sogrom-shop .shop-generator-table {
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--shop-line);
+}
+
+/* ---------------------------------------------- The shop counter
+
+   Four columns at the design width: the Trader's shelves, the two staging columns, and the
+   character's pack. The staging columns are fixed and narrow because they hold a list, not a
+   grid; the two tile panels take whatever is left and re-wrap their tiles into it.
+
+   A shop opts into this shape by rendering a `.shop-panel--stage` part, keyed on with `:has()`
+   for the same reason the manager's rail is — no extra class to remember. */
+
+.sogrom-shop-fullscreen:has(.shop-panel--stage) {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) var(--shop-stage-w) var(--shop-stage-w) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.sogrom-shop-windowed .window-content:has(.shop-panel--stage) {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr) var(--shop-stage-w) var(--shop-stage-w) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+}
+
+/* The two tile panels — your pack on the left, their shelves on the right — flank the counter.
+   The order is set by the order the parts are declared in `ShopApp.PARTS`, not here. */
+
+/* The chrome band and the footer span every column. The staging part is *two* columns wide and
+   lays its own pair out inside itself, which keeps the two halves of the counter together when
+   the grid collapses on a narrow window. */
+.sogrom-shop :is(.shop-topbar--shop, .shop-footer) { grid-column: 1 / -1; }
+.sogrom-shop .shop-panel--stage { grid-column: 2 / 4; }
+
+/* ---------------------------------------------- Shop top bar */
+
+.sogrom-shop .shop-topbar--shop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.sogrom-shop .shop-party { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }
+.sogrom-shop .shop-party--trader { justify-content: flex-end; }
+.sogrom-shop .shop-party--trader .shop-party-main { text-align: right; align-items: flex-end; }
+
+.sogrom-shop .shop-party-img {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border: 1px solid var(--shop-line-2);
+  border-radius: var(--shop-radius);
+}
+
+.sogrom-shop .shop-party-main { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+
+.sogrom-shop .shop-party-name {
+  font-family: var(--shop-font-heading);
+  font-size: 0.95rem;
+  color: var(--shop-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sogrom-shop .shop-topbar-centre {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.sogrom-shop .shop-rate { margin: 0; font-size: 0.72rem; color: var(--shop-faint); }
+.sogrom-shop .shop-topbar-tools { display: flex; align-items: center; gap: 0.35rem; }
+
+.sogrom-shop .shop-mode { display: flex; }
+
+.sogrom-shop .shop-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.8rem;
+  background: var(--shop-sunk);
+  border: 1px solid var(--shop-line-2);
+  color: var(--shop-muted);
+  cursor: pointer;
+  font-family: var(--shop-font-heading);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+}
+
+/* The two halves of one control, so the shared edge is drawn once. */
+.sogrom-shop .shop-mode-btn + .shop-mode-btn { border-left: none; }
+
+.sogrom-shop .shop-mode-btn.is-active {
+  background: var(--shop-open-soft);
+  border-color: var(--shop-open);
+  color: var(--shop-bright);
+}
+
+/* ---------------------------------------------- Shop panels */
+
+.sogrom-shop .shop-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border-right: 1px solid var(--shop-line-2);
+}
+
+/* The rightmost panel has the window edge; a border there would read as a stray line. The
+   Trader's shelves sit on the right, so that is the one — see `ShopApp.PARTS`. */
+.sogrom-shop .shop-panel--stock { border-right: none; }
+
+.sogrom-shop .shop-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.8rem;
+  background: var(--shop-sunk);
+  border-bottom: 1px solid var(--shop-line);
+  flex: 0 0 auto;
+}
+
+.sogrom-shop .shop-panel-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-right: auto;
+}
+
+.sogrom-shop .shop-panel-head h2 i { color: var(--shop-settled); font-size: 0.9em; }
+.sogrom-shop .shop-count { font-size: 0.7rem; color: var(--shop-faint); }
+
+.sogrom-shop .shop-search {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.4rem;
+  background: var(--shop-bg);
+  border: 1px solid var(--shop-line);
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-search input {
+  width: 8rem;
+  padding: 0.1rem;
+  background: none;
+  border: none;
+  color: var(--shop-text);
+  font-family: var(--shop-font-body);
+  font-size: 0.78rem;
+}
+
+/* Each panel scrolls on its own, so the chrome band and the footer never move. */
+.sogrom-shop .shop-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.7rem;
+}
+
+/* Hidden by the client-side search. A class rather than `display: none` inline, so the filter
+   can be applied and lifted without touching style attributes. */
+.sogrom-shop .shop-tile.is-filtered { display: none; }
+
+.sogrom-shop .shop-empty--panel { gap: 0.5rem; padding: 1.5rem 0.5rem; }
+.sogrom-shop .shop-empty--panel > i { font-size: 1.75rem; }
+.sogrom-shop .shop-empty--panel p { font-size: 0.82rem; }
+
+/* ---------------------------------------------- The staging columns */
+
+/* `minmax(0, 1fr)`, never a bare `1fr`.
+   A `1fr` track carries an automatic minimum of `min-content`, so the column holding staged
+   rows swells to fit the widest one while the empty column stays narrow — which is why these
+   two halves kept changing size as things were put on the counter. `minmax(0, …)` removes that
+   floor, so each column is exactly half the counter no matter what is in it.
+
+   The outer grid was already written this way; this inner split was missed, and it is the one
+   that was actually moving. */
+.sogrom-shop .shop-panel--stage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  background: rgba(13, 14, 17, 0.45);
+}
+
+.sogrom-shop .shop-stage-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Same reason: a grid item's default `min-width: auto` would let its content set the floor. */
+  min-width: 0;
+  border-right: 1px solid var(--shop-line);
+}
+
+.sogrom-shop .shop-stage-col .shop-panel-body { min-width: 0; }
+
+.sogrom-shop .shop-stage-col:last-child { border-right: none; }
+
+.sogrom-shop .shop-panel-head--stage { flex-direction: column; align-items: stretch; gap: 0.2rem; }
+.sogrom-shop .shop-panel-head--stage h2 { margin: 0; font-size: 0.7rem; }
+
+.sogrom-shop .shop-stage-total {
+  font-family: var(--shop-font-heading);
+  font-size: 0.85rem;
+  color: var(--shop-settled);
+}
+
+.sogrom-shop .shop-staged { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.sogrom-shop .shop-staged-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem;
+  /* The row is allowed to be narrower than its content; the name inside it ellipses. Without
+     this the longest item name on the counter would set the column's width. */
+  min-width: 0;
+  background: var(--shop-panel);
+  border: 1px solid var(--shop-line);
+  border-left-width: 3px;
+}
+
+/* Rarity as the left edge on a staged row: there is no room for a bordered tile here, and the
+   left edge is the one part of a dense row that stays visible. */
+.sogrom-shop .shop-staged-row.rarity-common { border-left-color: rgb(var(--shop-rarity-common)); }
+.sogrom-shop .shop-staged-row.rarity-uncommon { border-left-color: rgb(var(--shop-rarity-uncommon)); }
+.sogrom-shop .shop-staged-row.rarity-rare { border-left-color: rgb(var(--shop-rarity-rare)); }
+.sogrom-shop .shop-staged-row.rarity-veryrare { border-left-color: rgb(var(--shop-rarity-veryrare)); }
+.sogrom-shop .shop-staged-row.rarity-legendary { border-left-color: rgb(var(--shop-rarity-legendary)); }
+.sogrom-shop .shop-staged-row.rarity-artifact { border-left-color: rgb(var(--shop-rarity-artifact)); }
+
+.sogrom-shop .shop-staged-img {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border: none;
+}
+
+.sogrom-shop .shop-staged-main { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+
+.sogrom-shop .shop-staged-name {
+  font-size: 0.72rem;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sogrom-shop .shop-staged-line {
+  font-family: var(--shop-font-heading);
+  font-size: 0.68rem;
+  color: var(--shop-settled);
+}
+
+.sogrom-shop .shop-staged-qty {
+  font-family: var(--shop-font-heading);
+  font-size: 0.75rem;
+  color: var(--shop-bright);
+}
+
+.sogrom-shop .shop-stage-empty {
+  margin: 0;
+  padding: 0.5rem 0.2rem;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--shop-faint);
+  text-align: center;
+}
+
+/* A bare `<input type="number">` has an intrinsic width of ~177px in Chrome, which is wider
+   than this column — enough on its own to push the barter side out. Pinned to the column. */
+/* The coin boxes: five across, sized to share the column rather than to their content. A bare
+   `<input type="number">` has a ~177px intrinsic width in Chrome, wider than the whole column, so
+   every box is pinned to its track. */
+.sogrom-shop .shop-coin-inputs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.sogrom-shop .shop-coin-input {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.sogrom-shop .shop-coin-input input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.2rem 0.1rem;
+  text-align: center;
+  /* No spinner arrows: in a box this narrow they take the room the number needs, and the keyboard
+     and the wheel still work. */
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.sogrom-shop .shop-coin-input input::-webkit-inner-spin-button,
+.sogrom-shop .shop-coin-input input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+
+.sogrom-shop .shop-coin-denom {
+  font-family: var(--shop-font-heading);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--shop-settled);
+}
+
+.sogrom-shop .shop-coin-held {
+  font-family: var(--shop-font-body);
+  font-size: 0.62rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--shop-faint);
+}
+
+/* A coin the character has none of: shown, so the row keeps its shape, but plainly unavailable. */
+.sogrom-shop .shop-coin-input.is-empty { opacity: 0.45; }
+
+.sogrom-shop .shop-stage-gold legend {
+  padding: 0;
+  margin-bottom: 0.3rem;
+}
+
+.sogrom-shop .shop-stage-gold {
+  min-width: 0;
+  border: none;
+  border-top: 1px solid var(--shop-line);
+  margin: 0.7rem 0 0;
+  padding: 0.7rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--shop-line);
+  font-family: var(--shop-font-heading);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+}
+
+/* ---------------------------------------------- The shop footer */
+
+.sogrom-shop .shop-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1.25rem;
+  background: var(--shop-chrome-grad);
+  border-top: 1px solid var(--shop-line-2);
+  flex: 0 0 auto;
+}
+
+.sogrom-shop .shop-balance {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-right: auto;
+  font-size: 1.05rem;
+}
+
+.sogrom-shop .shop-balance-label {
+  font-family: var(--shop-font-heading);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.sogrom-shop .shop-balance-label.is-good { color: var(--shop-credit); }
+.sogrom-shop .shop-balance-label.is-bad { color: var(--shop-danger); }
+.sogrom-shop .shop-balance-idle { font-size: 0.85rem; font-style: italic; color: var(--shop-faint); }
+.sogrom-shop .shop-balance-note { font-size: 0.78rem; color: var(--shop-muted); }
+.sogrom-shop .shop-balance-note.is-bad { color: var(--shop-danger); }
+
+.sogrom-shop .shop-footer-actions { display: flex; gap: 0.5rem; }
+.sogrom-shop .shop-confirm { min-width: 11rem; }
+
+/* ---------------------------------------------- Chat cards
+
+   Not scoped under `.sogrom-shop` — these render inside Foundry's chat log, which is outside
+   our window entirely, so they carry their own `sogrom-shop-card` namespace instead. They also
+   cannot rely on our `--shop-*` tokens, which are declared on the shop root, so the few colours
+   they need are literal. */
+
+.sogrom-shop-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  font-family: 'Spectral', 'Palatino Linotype', Georgia, serif;
+}
+
+.sogrom-shop-card-head { display: flex; align-items: center; gap: 0.6rem; }
+
+.sogrom-shop-card-portrait {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border: 1px solid #656e7b;
+  border-radius: 0;
+}
+
+.sogrom-shop-card-titles { display: flex; flex-direction: column; min-width: 0; }
+
+.sogrom-shop-card-eyebrow {
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.sogrom-shop-card-name {
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: 1rem;
+  margin: 0;
+  border: none;
+}
+
+.sogrom-shop-card-greeting { margin: 0; font-style: italic; opacity: 0.85; }
+
+.sogrom-shop-card-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.45rem;
+  background: rgba(79, 179, 168, 0.16);
+  border: 1px solid #4fb3a8;
+  border-radius: 0;
+  color: inherit;
+  cursor: pointer;
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: 0.82rem;
+  letter-spacing: 0.05em;
+}
+
+.sogrom-shop-card-btn:hover:not(:disabled) { background: rgba(79, 179, 168, 0.3); }
+.sogrom-shop-card-btn:disabled { opacity: 0.5; cursor: progress; }
+
+.sogrom-shop-receipt-block { display: flex; flex-direction: column; gap: 0.2rem; }
+
+.sogrom-shop-receipt-block h4 {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  border: none;
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.sogrom-shop-receipt-block ul { margin: 0; padding: 0; list-style: none; }
+
+.sogrom-shop-receipt-block li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.1rem 0;
+  font-size: 0.82rem;
+}
+
+.sogrom-shop-receipt-block img { width: 22px; height: 22px; object-fit: contain; border: none; }
+.sogrom-shop-receipt-name { flex: 1; min-width: 0; }
+
+/* The item name is a real Foundry content link, so it arrives with the core `.content-link`
+   styling already on it. Only the bits that would look wrong inside a dense receipt row are
+   adjusted — it should read as a line of the receipt that happens to be clickable, not as a
+   button dropped into one. */
+.sogrom-shop-receipt-name .content-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  white-space: normal;
+}
+
+.sogrom-shop-receipt-name .content-link:hover { text-decoration: underline; }
+.sogrom-shop-receipt-line { font-family: 'Cinzel', Georgia, serif; font-size: 0.78rem; }
+
+.sogrom-shop-receipt-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(101, 110, 123, 0.5);
+}
+
+.sogrom-shop-receipt-total {
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: 0.9rem;
+  margin-right: auto;
+}
+
+.sogrom-shop-receipt-attitude { font-size: 0.76rem; opacity: 0.85; }
+
+/* ---------------------------------------------- Narrow viewports
+
+   Below the design width the rail is the first thing to go: it is navigation, and the pane
+   beside it is the work. Panels keep their own scroll rather than the window gaining one. */
+
+@media (max-width: 1180px) {
+  .sogrom-shop { --shop-rail-w: 210px; --shop-tile: 64px; }
+}
+
+@media (max-width: 1100px) {
+  /* Two columns rather than four: the shelves and the pack side by side on the first row, the
+     counter spanning both beneath them. Below this width four tile columns leave each one too
+     narrow for a single tile. */
+  .sogrom-shop-fullscreen:has(.shop-panel--stage),
+  .sogrom-shop-windowed .window-content:has(.shop-panel--stage) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  }
+  .sogrom-shop .shop-panel--stage { grid-column: 1 / -1; }
+}
+
+@media (max-width: 900px) {
+  .sogrom-shop-fullscreen:has(.shop-rail),
+  .sogrom-shop-windowed .window-content:has(.shop-rail) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+  .sogrom-shop .shop-rail {
+    border-right: none;
+    border-bottom: 1px solid var(--shop-line-2);
+    max-height: 34vh;
+  }
+  .sogrom-shop .shop-identity { flex-direction: column; }
+}
+
+/* Motion is decoration here — a tile lift and the attitude marker sliding. Honour the
+   preference rather than animating anyway. */
+@media (prefers-reduced-motion: reduce) {
+  .sogrom-shop * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------- Trading and Attitudes panes */
+
+.sogrom-shop .shop-filter-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  padding-top: 0.5rem;
+}
+
+.sogrom-shop .shop-filter-group h4 {
+  margin: 0 0 0.3rem;
+  border: none;
+  font-family: var(--shop-font-heading);
+  font-size: 0.7rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-attitudes { display: flex; flex-direction: column; gap: 0.85rem; }
+
+/* The slider and its readout as one cell. The number and the tier word sit together because a
+   slider alone gives no readable value, and the word carries the reading for anyone who cannot
+   separate the gradient's ends. */
+.sogrom-shop .shop-attitude-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 210px;
+}
+
+.sogrom-shop .shop-attitude-cell input[type="range"] { flex: 1; min-width: 110px; }
+
+.sogrom-shop .shop-attitude-cell-readout {
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--shop-muted);
+}
+
+.sogrom-shop .shop-attitude-cell-readout strong {
+  font-family: var(--shop-font-heading);
+  color: var(--shop-bright);
+}

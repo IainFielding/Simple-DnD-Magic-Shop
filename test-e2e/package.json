@@ -1,0 +1,16 @@
+{
+  "name": "sogrom-magic-shop-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Local end-to-end harness: drives a real Foundry install with a GM and two player clients joined at once, to exercise the Magic Shop's GM-authoritative trade boundary. Not shipped.",
+  "scripts": {
+    "link-module": "node scripts/link-module.mjs",
+    "provision": "node provision.mjs",
+    "test": "node run.mjs",
+    "test:bare": "node run.mjs --world=magicshop-bare",
+    "hold": "node run.mjs --hold"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

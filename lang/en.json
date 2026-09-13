@@ -1,0 +1,294 @@
+{
+  "sogrom-simple-dnd5e-magic-shop": {
+    "common": {
+      "close": "Close",
+      "search": "Search",
+      "clear": "Clear"
+    },
+    "settings": {
+      "traderManager": {
+        "name": "Traders",
+        "label": "Manage Traders",
+        "hint": "Create Traders, stock them, set how they price and who they like, and post them to chat."
+      },
+      "pricingPreset": {
+        "name": "Pricing",
+        "hint": "How hard Traders bargain. Charisma and the Trader's attitude move prices between the extremes of whichever curve you pick.",
+        "fair": "Fair — a stranger pays list price and sells at half",
+        "standard": "Standard — a stranger pays a 10% markup (recommended)",
+        "harsh": "Harsh — strangers are gouged; only real goodwill approaches fair"
+      },
+      "startingAttitude": {
+        "name": "Starting attitude",
+        "hint": "How a Trader feels about a character it has never met, on a scale of 0 to 100. Individual Traders can override this."
+      },
+      "attitudeGainPerPoint": {
+        "name": "Copper spent per point of attitude",
+        "hint": "How much a character must spend with a Trader to earn one point of goodwill. 10,000 copper is 100 gp. Set to 0 to switch the drift off."
+      },
+      "attitudeGainCap": {
+        "name": "Attitude earned per visit",
+        "hint": "The most goodwill a single shopping trip can earn, however much is spent. A visit is one in-game day."
+      },
+      "displayMode": {
+        "name": "Window style",
+        "hint": "Windowed opens a draggable, resizable window. Full screen covers the whole viewport, which suits shopping but hides the chat log behind it.",
+        "fullscreen": "Full screen",
+        "windowed": "Windowed"
+      },
+      "sceneButton": {
+        "name": "Toolbar button",
+        "hint": "Show a shop button in the scene controls, so you can reach the Trader Manager without opening settings. GM only."
+      },
+      "debug": {
+        "name": "Debug logging",
+        "hint": "Write this module's diagnostics to the browser console. Useful when reporting a problem."
+      }
+    },
+    "sceneControl": {
+      "title": "Traders"
+    },
+    "manager": {
+      "title": "Trader Manager",
+      "eyebrow": "Simple D&D Magic Shop",
+      "railLabel": "Traders in this world",
+      "traders": "Traders",
+      "newTrader": "New Trader",
+      "defaultName": "New Trader",
+      "copyName": "{name} (Copy)",
+      "folderName": "Traders",
+      "noTraders": "No Traders yet.",
+      "stockCount": "{count} lines",
+      "duplicate": "Duplicate this Trader, without its opinion of anyone",
+      "emptyHeading": "No Traders yet",
+      "emptyBody": "Create a Trader to give it stock, a purse, and an opinion of your players.",
+      "tabPending": "Not built yet — arriving with a later milestone.",
+      "tab": {
+        "identity": "Identity",
+        "stock": "Stock",
+        "trading": "Trading",
+        "attitudes": "Attitudes"
+      },
+      "delete": {
+        "title": "Delete Trader",
+        "tooltip": "Delete this Trader",
+        "body": "Delete <strong>{name}</strong>, its stock and everything it remembers about your players? This cannot be undone."
+      },
+      "identity": {
+        "name": "Name",
+        "greeting": "Greeting",
+        "greetingPlaceholder": "Come in, come in — mind the cauldron.",
+        "greetingHint": "Shown on the chat card and above the shop.",
+        "changePortrait": "Change portrait",
+        "startingAttitude": "Starting attitude",
+        "startingAttitudeHint": "How this Trader feels about a character it has not met. Leave at the world default unless this one is unusually warm or unusually mercenary.",
+        "purse": "Purse",
+        "purseHint": "What this Trader can pay out. Selling to it stops when the coin runs out."
+      },
+      "stock": {
+        "item": "Item",
+        "qty": "In stock",
+        "restockTo": "Restock to",
+        "override": "Price override",
+        "denomination": "Denomination",
+        "revealAt": "Reveal at",
+        "revealAtHint": "Attitude a character needs before they can see this line at all. Leave blank to show it to everyone.",
+        "unlimitedHint": "Never runs out",
+        "preview": "Buys / sells",
+        "previewNote": "Prices shown for a Charisma 10 stranger at attitude 50 — this Trader buys at ×{buys} and sells at ×{sells}. Your players will see their own.",
+        "remove": "Remove from stock",
+        "dropHint": "Drag items here from a compendium or the Items sidebar.",
+        "dropNoTrader": "Create a Trader first, then drop items onto it.",
+        "dropNotItem": "That is not an item.",
+        "dropNotPhysical": "{name} is not physical gear, so a Trader cannot stock it.",
+        "dropUnpriced": "{name} has no price. Set a price override, or players will not see it.",
+        "emptyHeading": "Nothing in stock",
+        "emptyBody": "Drag items onto this window from a compendium or the Items sidebar to stock the shelves.",
+        "browse": "Browse compendiums",
+        "clear": "Empty shelves",
+        "clearTitle": "Empty the shelves",
+        "clearBody": "Remove all {count} lines from <strong>{name}</strong>? This cannot be undone."
+      },
+      "generate": {
+        "toggle": "Generate",
+        "heading": "Generate stock",
+        "available": "{count} available",
+        "maxPrice": "Price ceiling",
+        "noLimit": "no limit",
+        "poolSize": "{count} items match",
+        "run": "Generate {count} items",
+        "sources": "Which compendiums to draw from",
+        "sourcesHint": "Leave all unticked to draw from every compendium you can see.",
+        "rollTable": "Roll table",
+        "pickTable": "Choose a table…",
+        "draws": "Draws",
+        "draw": "Draw",
+        "emptyBudget": "Ask for at least one item first.",
+        "shortfall": "Not enough to go round: {detail} could not be found in the chosen compendiums.",
+        "added": "{created} new lines, {raised} restocked.",
+        "someFailed": "{count} items could not be loaded and were skipped.",
+        "noBrowser": "This version of the D&D 5e system has no compendium browser to open.",
+        "noTable": "Choose a roll table first.",
+        "tableNoItems": "That table produced no items.",
+        "kinds": "Which kinds of item",
+        "kindsChosen": "(narrowed)",
+        "kindsHint": "Tick nothing to draw from everything. Ticking a heading takes any of its kinds; tick the ones beneath it to be more specific.",
+        "kindsClear": "Clear",
+        "notStockable": "{count} of those are not goods a shop can sell and were skipped ({names})."
+      },
+      "preview": "Preview",
+      "postCard": "Post to chat",
+      "posted": "{name} is open for business.",
+      "trading": {
+        "buys": "What they will buy",
+        "buysHint": "Gear this Trader will not take still shows in a player's pack, greyed, with the reason on hover.",
+        "allowAll": "Buys anything",
+        "types": "Item types",
+        "rarities": "Rarities",
+        "emptyMeansAny": "Tick none to accept any.",
+        "restock": {
+          "legend": "Restocking",
+          "mode": "When",
+          "manual": "Only when I say so",
+          "time": "Every so often",
+          "none": "Never",
+          "every": "Every (days)",
+          "now": "Restock now",
+          "due": "Next refill in {days} day(s) of game time.",
+          "hint": "Refilling tops each line back up to its “restock to” figure. It never trims a line you have stocked higher."
+        },
+        "restocked": "Refilled {count} line(s).",
+        "nothingToRestock": "The shelves are already full.",
+        "goodwill": "Goodwill from spending",
+        "gainCustom": "This Trader warms at its own rate",
+        "gainPerPoint": "Copper per point",
+        "gainCap": "Cap per visit",
+        "gainWorld": "Following the world: {cp} copper per point, up to {cap} a visit."
+      },
+      "attitudes": {
+        "note": "Every player character in the world, with what this Trader would pay them and charge them right now.",
+        "character": "Character",
+        "attitude": "Attitude",
+        "prices": "Buys / sells",
+        "spent": "Spent here",
+        "cha": "Charisma {mod}",
+        "forget": "Forget them",
+        "forgetHint": "Clear this Trader's memory of them, back to its starting attitude.",
+        "emptyHeading": "No characters yet",
+        "emptyBody": "Create a player character and this Trader will have an opinion about them."
+      }
+    },
+    "attitude": {
+      "label": "Attitude",
+      "readout": "Attitude: {value}",
+      "raise": "Raise attitude",
+      "lower": "Lower attitude",
+      "tier": {
+        "hostile": "Hostile",
+        "cold": "Cold",
+        "wary": "Wary",
+        "neutral": "Neutral",
+        "warm": "Warm",
+        "friendly": "Friendly",
+        "devoted": "Devoted"
+      }
+    },
+    "stock": {
+      "unlimited": "Unlimited stock"
+    },
+    "reject": {
+      "notPhysical": "This Trader deals in goods, not that.",
+      "unpriced": "Nobody can put a price on this.",
+      "wrongType": "This Trader does not deal in these.",
+      "wrongRarity": "This Trader has no interest in something like this."
+    },
+    "pricing": {
+      "error": {
+        "notPositive": "Every multiplier must be a number greater than zero.",
+        "buyNotMonotonic": "A Trader that likes you must not charge you more. Buy multipliers have to fall from hostile through neutral to devoted.",
+        "sellNotMonotonic": "A Trader that likes you must not pay you less. Sell multipliers have to rise from hostile through neutral to devoted.",
+        "arbitrage": "At full goodwill the sell multiplier meets or beats the buy multiplier, so a character could buy an item and sell it straight back for a profit. The devoted buy multiplier must stay above the devoted sell multiplier."
+      }
+    },
+    "rarity": {
+      "mundane": "Mundane",
+      "common": "Common",
+      "uncommon": "Uncommon",
+      "rare": "Rare",
+      "veryrare": "Very Rare",
+      "legendary": "Legendary",
+      "artifact": "Artifact"
+    },
+    "shop": {
+      "title": "Trade",
+      "mode": "How to trade",
+      "trade": "Trade",
+      "barter": "Barter",
+      "rate": "Buying at x{buy} · selling at x{sell}",
+      "yourPurse": "Your coin",
+      "traderPurse": "Their coin",
+      "refresh": "Refresh from the GM",
+      "stockHeading": "For sale",
+      "stockEmpty": "Nothing on the shelves.",
+      "packHeading": "Your pack",
+      "packEmpty": "You are carrying nothing sellable.",
+      "showing": "{count} shown",
+      "noneLeft": "That is all there is.",
+      "youTake": "You take",
+      "youGive": "You give",
+      "takeEmpty": "Nothing yet.",
+      "giveEmpty": "Nothing yet.",
+      "unstage": "Take one back off the counter (or right-click the item)",
+      "addCoin": "Add coins",
+      "addCoinHint": "From your purse, to balance an uneven swap. These exact coins change hands.",
+      "counterEmpty": "Click an item to put it on the counter; right-click to take it back.",
+      "youOwe": "You owe",
+      "youReceive": "You receive",
+      "cannotAfford": "You cannot cover that.",
+      "barterAccepted": "They will take that deal.",
+      "barterOver": "You are offering {amount} more than they are asking.",
+      "barterShort": "You are {amount} short of what they will accept.",
+      "confirm": "Confirm",
+      "settling": "Settling…",
+      "settled": "Done.",
+      "settledWithGoodwill": "Done. They think a little better of you (+{points}).",
+      "coinHeld": "of {held}"
+    },
+    "card": {
+      "eyebrow": "A trader is open for business",
+      "open": "Browse their wares"
+    },
+    "receipt": {
+      "eyebrow": "Trade settled",
+      "barterEyebrow": "Goods exchanged",
+      "title": "{actor} traded with {trader}",
+      "bought": "Bought",
+      "sold": "Sold",
+      "paid": "Paid {amount}",
+      "received": "Received {amount}",
+      "evenSwap": "An even swap",
+      "attitude": "+{points} attitude — now {tier}"
+    },
+    "error": {
+      "noGM": "No GM is online, so the trader is away. Try again when one is.",
+      "queryFailed": "The GM's client did not answer. Try again in a moment.",
+      "noTrader": "That trader is no longer here.",
+      "noCharacter": "That character could not be found.",
+      "notYourCharacter": "That is not your character.",
+      "noAssignedCharacter": "You have no character assigned, so there is nobody to shop with. Ask your GM.",
+      "shopRefused": "They will not trade with you right now.",
+      "stockGone": "They do not have that any more.",
+      "itemGone": "You are not carrying that any more.",
+      "notEnoughStock": "They only have {qty} of {name} left.",
+      "notEnoughHeld": "You only have {qty} of {name}.",
+      "notForSale": "{name} is not for sale.",
+      "nothingStaged": "There is nothing on the counter.",
+      "cannotAfford": "You are {short} short.",
+      "traderCannotAfford": "{name} only has {purse} to pay with.",
+      "barterRefused": "They will not take that — you are {short} short of what they want.",
+      "tradeVetoed": "They will not go through with it.",
+      "gmOnly": "{call} can only be called by a GM.",
+      "notEnoughCoin": "You only have {qty} {denomination}."
+    }
+  }
+}

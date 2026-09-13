@@ -1,0 +1,22 @@
+{{!--
+  One line on the counter. Shared by both staging columns, so what you are taking and what you
+  are giving are listed identically — the only difference is which column they sit in and which
+  side the minus button unstages from.
+
+  `side` comes from the row data, not from the enclosing panel, because both columns live inside
+  the same part and a `data-side` on the wrapper would be ambiguous.
+--}}
+<li class="shop-staged-row{{#if rarity}} rarity-{{rarity}}{{/if}}"
+    data-item-id="{{id}}" data-side="{{side}}" data-uuid="{{uuid}}">
+  <img class="shop-staged-img" src="{{img}}" alt="" data-tooltip="{{shopItemTooltip uuid}}">
+  <span class="shop-staged-main">
+    <span class="shop-staged-name">{{name}}</span>
+    <span class="shop-staged-line">{{line}}</span>
+  </span>
+  <span class="shop-staged-qty">&times;{{qty}}</span>
+  <button type="button" class="shop-icon-btn" data-action="unstageLine"
+          data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.unstage'}}"
+          aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.unstage'}}">
+    <i class="fa-solid fa-minus"></i>
+  </button>
+</li>

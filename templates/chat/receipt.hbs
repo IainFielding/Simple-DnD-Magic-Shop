@@ -1,0 +1,91 @@
+{{!--
+  The receipt posted after a trade settles. Rendered by trade/receipt.mjs.
+
+  A record rather than a prompt: it says who traded with whom, what moved in each direction, and
+  what it came to. Public by default, because a shop is a table event — the party generally
+  wants to know the wizard just spent the treasury on a staff.
+
+  Every figure here is the *settled* one, taken from what the GM actually wrote, not from what
+  the player's window was showing when they pressed the button.
+--}}
+<div class="sogrom-shop-card sogrom-shop-receipt">
+  <header class="sogrom-shop-card-head">
+    <img class="sogrom-shop-card-portrait" src="{{actorImg}}" alt="">
+    <div class="sogrom-shop-card-titles">
+      <span class="sogrom-shop-card-eyebrow">
+        {{#if barter}}
+          {{localize "sogrom-simple-dnd5e-magic-shop.receipt.barterEyebrow"}}
+        {{else}}
+          {{localize "sogrom-simple-dnd5e-magic-shop.receipt.eyebrow"}}
+        {{/if}}
+      </span>
+      <h3 class="sogrom-shop-card-name">
+        {{localize "sogrom-simple-dnd5e-magic-shop.receipt.title" actor=actorName trader=traderName}}
+      </h3>
+    </div>
+  </header>
+
+  {{#if bought.length}}
+  <section class="sogrom-shop-receipt-block">
+    <h4><i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.receipt.bought"}}</h4>
+    <ul>
+      {{#each bought}}
+      <li>
+        <img src="{{img}}" alt="">
+        {{!-- Triple-stache because `link` is a finished anchor built with Foundry's own
+              `toAnchor()`, not user text — escaping it would print the markup. It is empty for
+              anything with no compendium entry to point at, and the name renders plain. --}}
+        <span class="sogrom-shop-receipt-name">
+          {{#if link}}{{{link}}}{{else}}{{name}}{{/if}}{{#if qty}} &times;{{qty}}{{/if}}
+        </span>
+        <span class="sogrom-shop-receipt-line">{{line}}</span>
+      </li>
+      {{/each}}
+    </ul>
+  </section>
+  {{/if}}
+
+  {{#if sold.length}}
+  <section class="sogrom-shop-receipt-block">
+    <h4><i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.receipt.sold"}}</h4>
+    <ul>
+      {{#each sold}}
+      <li>
+        <img src="{{img}}" alt="">
+        {{!-- Triple-stache because `link` is a finished anchor built with Foundry's own
+              `toAnchor()`, not user text — escaping it would print the markup. It is empty for
+              anything with no compendium entry to point at, and the name renders plain. --}}
+        <span class="sogrom-shop-receipt-name">
+          {{#if link}}{{{link}}}{{else}}{{name}}{{/if}}{{#if qty}} &times;{{qty}}{{/if}}
+        </span>
+        <span class="sogrom-shop-receipt-line">{{line}}</span>
+      </li>
+      {{/each}}
+    </ul>
+  </section>
+  {{/if}}
+
+  <footer class="sogrom-shop-receipt-foot">
+    <span class="sogrom-shop-receipt-total">
+      {{#if paidCp}}
+        {{localize "sogrom-simple-dnd5e-magic-shop.receipt.paid" amount=paid}}
+      {{else if receivedCp}}
+        {{localize "sogrom-simple-dnd5e-magic-shop.receipt.received" amount=received}}
+      {{else}}
+        {{localize "sogrom-simple-dnd5e-magic-shop.receipt.evenSwap"}}
+      {{/if}}
+    </span>
+
+    {{#if attitudeGained}}
+    {{!-- Only shown when goodwill actually moved: a line saying "+0 attitude" on every
+          purchase would be noise, and this is the one thing a player most wants to see. --}}
+    <span class="sogrom-shop-receipt-attitude">
+      <i class="fa-solid fa-face-smile" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.receipt.attitude"
+         points=attitudeGained tier=attitudeTier}}
+    </span>
+    {{/if}}
+  </footer>
+</div>

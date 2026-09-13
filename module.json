@@ -1,0 +1,51 @@
+{
+  "id": "sogrom-simple-dnd5e-magic-shop",
+  "title": "Simple D&D Magic Shop",
+  "description": "Create Traders your players can actually haggle with. The GM stocks a Trader and posts it to chat; a player clicks the card and a full-screen shop opens at prices set by their character's Charisma and by how much the Trader likes them.",
+  "version": "#{VERSION}#",
+  "compatibility": {
+    "minimum": "14.359",
+    "maximum": "14.999",
+    "verified": "14.367"
+  },
+  "authors": [
+    {
+      "name": "Iain Fielding",
+      "url": "https://iainfielding.com",
+      "discord": "Sogrom"
+    }
+  ],
+  "relationships": {
+    "conflicts": [],
+    "optional": [],
+    "systems": [
+      {
+        "id": "dnd5e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "6.0.0",
+          "maximum": "6.99.99",
+          "verified": "6.0.1"
+        }
+      }
+    ]
+  },
+  "esmodules": [
+    "scripts/main.mjs"
+  ],
+  "styles": [
+    "styles/fonts.css",
+    "styles/shop.css"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ],
+  "url": "#{URL}#",
+  "manifest": "#{MANIFEST}#",
+  "download": "#{DOWNLOAD}#",
+  "license": "LICENSE"
+}

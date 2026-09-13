@@ -1,0 +1,554 @@
+{{!--
+  The selected Trader: a tab strip, then whichever pane is showing.
+
+  Every control carries `data-shop-field` and commits on `change` — blur or Enter, not per
+  keystroke. There is no Save button, deliberately: stock is embedded documents on a real actor,
+  and a GM who has spent twenty minutes stocking a shop must not be able to lose it to a stray
+  Escape. See the class comment in scripts/app/manager-app.mjs.
+
+  Stock rows are addressed by `data-item-id` on the row rather than by form-field `name`s.
+  Foundry's form serialisation runs names through `expandObject`, which treats dots as path
+  separators, and the flag paths these write into contain them.
+--}}
+<section class="shop-pane">
+
+  {{#if trader}}
+  <div class="shop-tabs" role="tablist">
+    {{#each tabs}}
+    <button type="button" class="shop-tab {{#if active}}is-active{{/if}}"
+            role="tab" aria-selected="{{#if active}}true{{else}}false{{/if}}"
+            data-action="selectTab" data-tab="{{id}}"
+            {{#unless ready}}disabled
+            data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.tabPending'}}"{{/unless}}>
+      <i class="{{icon}}" aria-hidden="true"></i>
+      {{label}}
+    </button>
+    {{/each}}
+  </div>
+
+  {{#if (eq tab "identity")}}
+  {{!-- ---------------------------------------------- Identity --}}
+  <div class="shop-form" role="tabpanel">
+
+    <div class="shop-identity">
+      <button type="button" class="shop-portrait" data-action="pickPortrait"
+              data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.identity.changePortrait'}}"
+              aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.identity.changePortrait'}}">
+        <img src="{{trader.img}}" alt="">
+        <span class="shop-portrait-hint"><i class="fa-solid fa-camera"></i></span>
+      </button>
+
+      <div class="shop-identity-fields">
+        <label class="shop-field">
+          <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.identity.name"}}</span>
+          <input type="text" data-shop-field="name" value="{{trader.name}}" autocomplete="off">
+        </label>
+
+        <label class="shop-field">
+          <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.identity.greeting"}}</span>
+          <textarea data-shop-field="greeting" rows="3"
+                    placeholder="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.identity.greetingPlaceholder'}}">{{trader.greeting}}</textarea>
+          <span class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.identity.greetingHint"}}</span>
+        </label>
+      </div>
+    </div>
+
+    <label class="shop-field">
+      <span class="shop-field-label">
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.identity.startingAttitude"}}
+        <output class="shop-field-value">{{trader.startingAttitude}}</output>
+      </span>
+      <input type="range" data-shop-field="startingAttitude" min="0" max="100" step="5"
+             value="{{trader.startingAttitude}}">
+      <span class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.identity.startingAttitudeHint"}}</span>
+    </label>
+
+    <fieldset class="shop-fieldset">
+      <legend>
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.identity.purse"}}
+        <span class="shop-field-value">{{trader.purse}}</span>
+      </legend>
+      <span class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.identity.purseHint"}}</span>
+      <div class="shop-currency">
+        {{#each trader.currency}}
+        <label class="shop-currency-slot">
+          <span>{{label}}</span>
+          <input type="number" min="0" step="1" data-shop-field="currency"
+                 data-denomination="{{key}}" value="{{value}}">
+        </label>
+        {{/each}}
+      </div>
+    </fieldset>
+  </div>
+
+  {{else if (eq tab "stock")}}
+  {{!-- ---------------------------------------------- Stock --}}
+  <div class="shop-stock" role="tabpanel">
+
+    <div class="shop-stock-tools">
+      <p class="shop-dropzone-hint">
+        <i class="fa-solid fa-hand-pointer" aria-hidden="true"></i>
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.dropHint"}}
+      </p>
+      <div class="shop-stock-actions">
+        <button type="button" class="shop-btn" data-action="addFromCompendium">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.browse"}}
+        </button>
+        <button type="button" class="shop-btn {{#if generator.open}}is-on{{/if}}"
+                data-action="toggleGenerator" aria-expanded="{{#if generator.open}}true{{else}}false{{/if}}">
+          <i class="fa-solid fa-dice-d20"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.toggle"}}
+        </button>
+        {{#if hasRows}}
+        <button type="button" class="shop-btn shop-btn--danger" data-action="clearStock">
+          <i class="fa-solid fa-trash-can"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.clear"}}
+        </button>
+        {{/if}}
+      </div>
+    </div>
+
+    {{#if generator.open}}
+    {{!--
+      The generator. Each rarity input says how many the *filtered* pool actually holds, so a
+      GM asking for three artifacts can see their packs contain one rather than generating and
+      wondering. The price ceiling matters more than it looks: without it, "1 rare" can hand
+      back a 20,000 gp staff and unbalance a campaign in a single click.
+    --}}
+    <section class="shop-generator">
+      <h3 class="shop-generator-head">
+        <i class="fa-solid fa-dice-d20" aria-hidden="true"></i>
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.heading"}}
+      </h3>
+
+      <div class="shop-generator-grid">
+        {{#each generator.buckets}}
+        <label class="shop-generator-bucket {{#unless available}}is-empty{{/unless}}">
+          <span class="shop-generator-label">{{label}}</span>
+          <input type="number" min="0" max="200" step="1" value="{{value}}"
+                 data-shop-field="gen.budget.{{key}}"
+                 {{#unless available}}disabled{{/unless}}>
+          <span class="shop-generator-avail">
+            {{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.available" count=available}}
+          </span>
+        </label>
+        {{/each}}
+      </div>
+
+      <div class="shop-generator-row">
+        <label class="shop-field shop-field--inline">
+          <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.maxPrice"}}</span>
+          <span class="shop-price-cell">
+            <input type="number" min="0" step="any" value="{{generator.maxValue}}"
+                   placeholder="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.generate.noLimit'}}"
+                   data-shop-field="gen.maxValue">
+            <select data-shop-field="gen.maxDenom"
+                    aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.denomination'}}">
+              {{#each generator.denominations}}
+              <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+              {{/each}}
+            </select>
+          </span>
+        </label>
+
+        <p class="shop-generator-pool">
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.poolSize" count=generator.poolSize}}
+        </p>
+
+        <button type="button" class="shop-btn shop-btn--primary" data-action="generateStock"
+                {{#unless generator.total}}disabled{{/unless}}>
+          <i class="fa-solid fa-wand-sparkles"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.run" count=generator.total}}
+        </button>
+      </div>
+
+      {{!--
+        Which kinds of item to draw from. Two levels, because dnd5e has six physical item types
+        and neither "armour" nor "musical instrument" is one of them — armour is a subtype of
+        equipment, an instrument a subtype of tool. Ticking a heading means any of its subtypes.
+
+        Only kinds the narrowed pool actually contains are offered: a list of forty tickable
+        things that would generate nothing is worse than a short list of things that work.
+      --}}
+      <details class="shop-generator-sources" data-shop-details="kinds"
+               {{#unless generator.anyCategory}}open{{/unless}}>
+        <summary>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.kinds"}}
+          {{#unless generator.anyCategory}}
+          <span class="shop-generator-avail">
+            {{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.kindsChosen"}}
+          </span>
+          {{/unless}}
+        </summary>
+
+        <p class="shop-field-hint">
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.kindsHint"}}
+          {{#unless generator.anyCategory}}
+          <button type="button" class="shop-btn shop-btn--ghost" data-action="clearCategories">
+            {{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.kindsClear"}}
+          </button>
+          {{/unless}}
+        </p>
+
+        <div class="shop-generator-kinds">
+          {{#each generator.categories}}
+          <div class="shop-kind-group">
+            <label class="shop-check shop-check--block shop-kind-head">
+              <input type="checkbox" data-shop-field="category" data-category="{{value}}"
+                     {{#if checked}}checked{{/if}}>
+              <span>{{label}} <span class="shop-generator-avail">({{count}})</span></span>
+            </label>
+
+            {{#if hasSubtypes}}
+            <div class="shop-kind-subs">
+              {{#each subtypes}}
+              <label class="shop-check shop-check--block">
+                <input type="checkbox" data-shop-field="category" data-category="{{value}}"
+                       {{#if checked}}checked{{/if}}>
+                <span>{{label}} <span class="shop-generator-avail">({{count}})</span></span>
+              </label>
+              {{/each}}
+            </div>
+            {{/if}}
+          </div>
+          {{/each}}
+        </div>
+      </details>
+
+      <details class="shop-generator-sources" data-shop-details="sources">
+        <summary>{{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.sources"}}</summary>
+        <p class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.sourcesHint"}}</p>
+        <div class="shop-generator-packs">
+          {{#each generator.sources}}
+          <label class="shop-check shop-check--block">
+            <input type="checkbox" data-shop-field="gen.pack" data-pack="{{id}}"
+                   {{#if checked}}checked{{/if}}>
+            <span>{{label}} <span class="shop-generator-avail">({{count}})</span></span>
+          </label>
+          {{/each}}
+        </div>
+      </details>
+
+      {{#if generator.hasTables}}
+      <div class="shop-generator-row shop-generator-table">
+        <label class="shop-field shop-field--inline">
+          <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.rollTable"}}</span>
+          <select data-shop-field="gen.tableId">
+            <option value="">{{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.pickTable"}}</option>
+            {{#each generator.tables}}
+            <option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>
+            {{/each}}
+          </select>
+        </label>
+
+        <label class="shop-field shop-field--inline">
+          <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.draws"}}</span>
+          <input type="number" min="1" max="100" step="1" value="{{generator.draws}}"
+                 data-shop-field="gen.draws">
+        </label>
+
+        <button type="button" class="shop-btn" data-action="drawFromTable"
+                {{#unless generator.tableId}}disabled{{/unless}}>
+          <i class="fa-solid fa-dice"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.generate.draw"}}
+        </button>
+      </div>
+      {{/if}}
+    </section>
+    {{/if}}
+
+    {{#if hasRows}}
+    <p class="shop-preview-note">{{previewNote}}</p>
+
+    <table class="shop-stock-table">
+      <thead>
+        <tr>
+          <th scope="col" class="shop-col-item">{{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.item"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.qty"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.restockTo"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.override"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.revealAt"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.preview"}}</th>
+          <th scope="col"><span class="shop-sr-only">{{localize "sogrom-simple-dnd5e-magic-shop.common.clear"}}</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each rows}}
+        <tr class="shop-stock-row {{#if unpriced}}is-unpriced{{/if}}" data-item-id="{{id}}">
+
+          <td class="shop-col-item">
+            <button type="button" class="shop-stock-item" data-action="openStockItem"
+                    data-tooltip="{{shopItemTooltip uuid}}">
+              <img src="{{img}}" alt="">
+              {{!-- The name alone. The item's type used to sit under it as a second line, which
+                    added a row of "Weapon"/"Loot" to every line of the table without telling the
+                    GM anything they could not see from the icon. --}}
+              <span class="shop-stock-name">
+                <span class="{{#if rarity}}shop-rarity-text rarity-{{rarity}}{{/if}}">{{name}}</span>
+              </span>
+            </button>
+          </td>
+
+          <td>
+            <div class="shop-qty-cell">
+              <input type="number" min="0" step="1" data-shop-field="quantity" value="{{quantity}}"
+                     {{#if unlimited}}disabled{{/if}}
+                     aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.qty'}}">
+              <label class="shop-check"
+                     data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.unlimitedHint'}}">
+                <input type="checkbox" data-shop-field="unlimited" {{#if unlimited}}checked{{/if}}>
+                <i class="fa-solid fa-infinity" aria-hidden="true"></i>
+                <span class="shop-sr-only">{{localize "sogrom-simple-dnd5e-magic-shop.stock.unlimited"}}</span>
+              </label>
+            </div>
+          </td>
+
+          <td>
+            <input type="number" min="1" step="1" data-shop-field="baseQty" value="{{baseQty}}"
+                   {{#if unlimited}}disabled{{/if}}
+                   aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.restockTo'}}">
+          </td>
+
+          <td>
+            <div class="shop-price-cell">
+              <input type="number" min="0" step="any" data-shop-field="overrideValue"
+                     value="{{overrideValue}}" placeholder="—"
+                     aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.override'}}">
+              <select data-shop-field="overrideDenom"
+                      aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.denomination'}}">
+                {{#each denominations}}
+                <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+                {{/each}}
+              </select>
+            </div>
+          </td>
+
+          <td>
+            <input type="number" min="0" max="100" step="5" data-shop-field="revealAt"
+                   value="{{revealAt}}" placeholder="—"
+                   data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.revealAtHint'}}"
+                   aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.revealAt'}}">
+          </td>
+
+          {{!-- From the Trader's side, like the rate line in the shop: what it pays for this,
+                then what it charges for it. The row context keeps the character-side names
+                (`previewBuy` is what a character pays), so they cross over here on purpose. --}}
+          <td class="shop-col-preview">
+            <span class="shop-preview-buys" data-cp="{{previewSellCp}}">{{previewSell}}</span>
+            <span class="shop-preview-sells" data-cp="{{previewBuyCp}}">{{previewBuy}}</span>
+          </td>
+
+          <td>
+            <button type="button" class="shop-icon-btn shop-icon-btn--danger" data-action="removeStock"
+                    data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.remove'}}"
+                    aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.remove'}}">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+    {{else}}
+    <div class="shop-empty">
+      <i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i>
+      <h2>{{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.emptyHeading"}}</h2>
+      <p>{{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.emptyBody"}}</p>
+    </div>
+    {{/if}}
+  </div>
+
+  {{else if (eq tab "trading")}}
+  {{!-- ---------------------------------------------- Trading --}}
+  <div class="shop-form" role="tabpanel">
+
+    <fieldset class="shop-fieldset">
+      <legend>{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.buys"}}</legend>
+      <span class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.buysHint"}}</span>
+
+      <label class="shop-check shop-check--block">
+        <input type="checkbox" data-shop-field="allowAll" {{#if buyFilter.allowAll}}checked{{/if}}>
+        <span>{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.allowAll"}}</span>
+      </label>
+
+      {{#unless buyFilter.allowAll}}
+      {{!-- Only shown once the Trader is fussy: two long checkbox lists that do nothing are
+            worse than absent, because they invite a GM to set them and conclude the module is
+            broken when nothing changes. --}}
+      <div class="shop-filter-groups">
+        <div class="shop-filter-group">
+          <h4>{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.types"}}</h4>
+          <p class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.emptyMeansAny"}}</p>
+          {{#each buyFilter.types}}
+          <label class="shop-check shop-check--block">
+            <input type="checkbox" data-shop-field="filterType" data-value="{{value}}"
+                   {{#if checked}}checked{{/if}}>
+            <span>{{label}}</span>
+          </label>
+          {{/each}}
+        </div>
+
+        <div class="shop-filter-group">
+          <h4>{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.rarities"}}</h4>
+          <p class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.emptyMeansAny"}}</p>
+          {{#each buyFilter.rarities}}
+          <label class="shop-check shop-check--block">
+            <input type="checkbox" data-shop-field="filterRarity" data-value="{{value}}"
+                   {{#if checked}}checked{{/if}}>
+            <span>{{label}}</span>
+          </label>
+          {{/each}}
+        </div>
+      </div>
+      {{/unless}}
+    </fieldset>
+
+    <fieldset class="shop-fieldset">
+      <legend>{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.restock.legend"}}</legend>
+
+      <div class="shop-generator-row">
+        <label class="shop-field shop-field--inline">
+          <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.restock.mode"}}</span>
+          <select data-shop-field="restockMode">
+            {{#each restock.modes}}
+            <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+            {{/each}}
+          </select>
+        </label>
+
+        {{#if restock.timed}}
+        <label class="shop-field shop-field--inline">
+          <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.restock.every"}}</span>
+          <input type="number" min="1" max="3650" step="1" value="{{restock.days}}"
+                 data-shop-field="restockDays">
+        </label>
+        {{/if}}
+
+        <button type="button" class="shop-btn" data-action="restockNow">
+          <i class="fa-solid fa-boxes-packing"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.restock.now"}}
+        </button>
+      </div>
+
+      {{#if restock.timed}}
+      <span class="shop-field-hint">
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.restock.due" days=restock.due}}
+      </span>
+      {{/if}}
+      <span class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.restock.hint"}}</span>
+    </fieldset>
+
+    <fieldset class="shop-fieldset">
+      <legend>{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.goodwill"}}</legend>
+
+      <label class="shop-check shop-check--block">
+        <input type="checkbox" data-shop-field="gainCustom" {{#if gain.custom}}checked{{/if}}>
+        <span>{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.gainCustom"}}</span>
+      </label>
+
+      {{#if gain.custom}}
+      <div class="shop-generator-row">
+        <label class="shop-field shop-field--inline">
+          <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.gainPerPoint"}}</span>
+          <input type="number" min="0" step="100" value="{{gain.cpPerPoint}}"
+                 data-shop-field="gainPerPoint">
+        </label>
+        <label class="shop-field shop-field--inline">
+          <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.gainCap"}}</span>
+          <input type="number" min="0" max="25" step="1" value="{{gain.capPerVisit}}"
+                 data-shop-field="gainCap">
+        </label>
+      </div>
+      {{else}}
+      <span class="shop-field-hint">
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.gainWorld"
+           cp=gain.worldPerPoint cap=gain.worldCap}}
+      </span>
+      {{/if}}
+    </fieldset>
+  </div>
+
+  {{else if (eq tab "attitudes")}}
+  {{!-- ---------------------------------------------- Attitudes --}}
+  <div class="shop-attitudes" role="tabpanel">
+    {{#if hasCharacters}}
+    <p class="shop-preview-note">{{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.note"}}</p>
+
+    <table class="shop-stock-table">
+      <thead>
+        <tr>
+          <th scope="col" class="shop-col-item">{{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.character"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.attitude"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.prices"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.spent"}}</th>
+          <th scope="col"><span class="shop-sr-only">{{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.forget"}}</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each attitudes}}
+        <tr class="shop-stock-row" data-character-id="{{id}}">
+          <td class="shop-col-item">
+            <span class="shop-stock-item">
+              <img src="{{img}}" alt="">
+              <span class="shop-stock-name">
+                <span>{{name}}</span>
+                <span class="shop-stock-type">
+                  {{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.cha" mod=chaMod}}
+                </span>
+              </span>
+            </span>
+          </td>
+
+          <td>
+            <div class="shop-attitude-cell">
+              <input type="range" min="0" max="100" step="5" value="{{value}}"
+                     data-shop-field="attitude"
+                     aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.attitude.label'}}">
+              <span class="shop-attitude-cell-readout">
+                <strong>{{value}}</strong> {{tier}}
+              </span>
+            </div>
+          </td>
+
+          {{!-- Trader's side, as above: what it would pay this character, then what it would
+                charge them. --}}
+          <td class="shop-col-preview">
+            <span class="shop-preview-buys">&times;{{multipliers.sell}}</span>
+            <span class="shop-preview-sells">&times;{{multipliers.buy}}</span>
+          </td>
+
+          <td>{{spent}}</td>
+
+          <td>
+            {{#if met}}
+            <button type="button" class="shop-icon-btn" data-action="resetAttitude"
+                    data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.attitudes.forgetHint'}}"
+                    aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.attitudes.forget'}}">
+              <i class="fa-solid fa-rotate-left"></i>
+            </button>
+            {{/if}}
+          </td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+    {{else}}
+    <div class="shop-empty">
+      <i class="fa-solid fa-face-smile" aria-hidden="true"></i>
+      <h2>{{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.emptyHeading"}}</h2>
+      <p>{{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.emptyBody"}}</p>
+    </div>
+    {{/if}}
+  </div>
+  {{/if}}
+
+  {{else}}
+  {{!-- ---------------------------------------------- No Traders yet --}}
+  <div class="shop-empty">
+    <i class="fa-solid fa-shop" aria-hidden="true"></i>
+    <h2>{{localize "sogrom-simple-dnd5e-magic-shop.manager.emptyHeading"}}</h2>
+    <p>{{localize "sogrom-simple-dnd5e-magic-shop.manager.emptyBody"}}</p>
+  </div>
+  {{/if}}
+</section>

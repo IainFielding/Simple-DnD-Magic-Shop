@@ -1,0 +1,39 @@
+{{!--
+  The Trader's shelves. Only what this character is allowed to see is in the payload at all —
+  lines gated behind an attitude threshold they have not reached are filtered out on the GM's
+  client, so there is nothing here to hide.
+
+  `data-side="take"` on the panel is what tells the tile handlers which side of the counter a
+  click belongs to, so the one tile partial serves both panels.
+--}}
+<section class="shop-panel shop-panel--stock" data-side="take">
+  <header class="shop-panel-head">
+    <h2>
+      <i class="fa-solid fa-store" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.shop.stockHeading"}}
+    </h2>
+    <label class="shop-search">
+      <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+      <input type="search" data-shop-search="stock" autocomplete="off"
+             placeholder="{{localize 'sogrom-simple-dnd5e-magic-shop.common.search'}}"
+             aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.common.search'}}">
+    </label>
+    {{!-- Rewritten by the client-side filter and announced politely. Filtering hides tiles in
+          the DOM without a re-render, so a Handlebars number would go stale the moment
+          anything is typed. --}}
+    <span class="shop-count" data-shop-count aria-live="polite" aria-atomic="true"></span>
+  </header>
+
+  <div class="shop-panel-body">
+    {{#if stock.length}}
+    <ul class="shop-tiles">
+      {{#each stock}}{{> shopTile}}{{/each}}
+    </ul>
+    {{else}}
+    <div class="shop-empty shop-empty--panel">
+      <i class="fa-solid fa-store-slash" aria-hidden="true"></i>
+      <p>{{localize "sogrom-simple-dnd5e-magic-shop.shop.stockEmpty"}}</p>
+    </div>
+    {{/if}}
+  </div>
+</section>

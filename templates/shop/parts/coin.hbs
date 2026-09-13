@@ -1,0 +1,15 @@
+{{!--
+  A money amount with its coin icon. One partial so every purse, price and running total in the
+  module is punctuated the same way.
+
+  Context:
+    value  pre-formatted string ("15 gp", "7 sp 5 cp") — formatting is the data layer's job,
+           because the copper-to-denominations walk needs the system's conversion rates
+    tone   optional: "good" | "bad" | "dim", for a credit, a debt, or an inactive figure
+    label  optional screen-reader prefix, when the figure appears without a visible heading
+--}}
+<span class="shop-coin{{#if tone}} is-{{tone}}{{/if}}">
+  <i class="fa-solid fa-coins" aria-hidden="true"></i>
+  {{#if label}}<span class="shop-sr-only">{{label}}</span>{{/if}}
+  <span class="shop-coin-value">{{value}}</span>
+</span>
