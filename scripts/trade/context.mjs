@@ -1,5 +1,5 @@
 import {
-  HOOKS, SETTINGS, fireCancellableHook, log, normalizeRarity, pricingAnchors, setting, t
+  HOOKS, MAX_STOCK_LINES, SETTINGS, fireCancellableHook, log, normalizeRarity, pricingAnchors, setting, t
 } from "../config.mjs";
 import { attitudeTier } from "../data/attitude.mjs";
 import { HAGGLE_SKILLS, haggleDc, haggleEdge, isHaggleLocked } from "../data/haggle.mjs";
@@ -378,6 +378,10 @@ function visibleStock(trader, attitude, multipliers, fixedValue) {
 function sellableInventory(trader, actor, multipliers, fixedValue) {
   const filter = traderData(trader).buyFilter;
   const out = [];
+  // A full Trader still buys what it already stocks — that merges into the line — but nothing new.
+  const shelf = stockEntries(trader);
+  const stocked = new Set(shelf.map(e => `${e.item.type}:${e.item.name}`));
+  const full = shelf.length >= MAX_STOCK_LINES;
 
   for ( const item of actor.items ) {
     // Containers are skipped outright: selling a backpack whose contents are tracked inside it
@@ -394,6 +398,7 @@ function sellableInventory(trader, actor, multipliers, fixedValue) {
     const qty = Math.max(0, Math.floor(Number(item.system?.quantity) || 0));
     if ( qty <= 0 ) continue;
 
+    const noRoom = accepted && full && !stocked.has(`${item.type}:${item.name}`);
     const fixed = isFixedValue(item, fixedValue);
     const sellCp = accepted ? applyMultiplier(valueCp, lineMultiplier(multipliers.sell, fixed)) : 0;
     out.push({
@@ -411,8 +416,8 @@ function sellableInventory(trader, actor, multipliers, fixedValue) {
       price: accepted ? formatCp(sellCp) : "",
       equipped: !!item.system?.equipped,
       attuned: !!item.system?.attuned,
-      blocked: !accepted,
-      blockedWhy: accepted ? null : t(`reject.${reason}`)
+      blocked: !accepted || noRoom,
+      blockedWhy: !accepted ? t(`reject.${reason}`) : noRoom ? t("reject.shopFull") : null
     });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang));

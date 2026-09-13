@@ -1,4 +1,4 @@
-import { MODULE_ID, PHYSICAL_TYPES } from "../config.mjs";
+import { MAX_STOCK_LINES, MODULE_ID, PHYSICAL_TYPES } from "../config.mjs";
 import { clampAttitude } from "./attitude.mjs";
 import { sanitizeRestock } from "./restock.mjs";
 import { sanitizeBuyFilter, sanitizeLine } from "./stock.mjs";
@@ -35,8 +35,11 @@ export const EXPORT_FORMAT = `${MODULE_ID}.trader`;
  */
 export const EXPORT_VERSION = 1;
 
-/** The most stock lines an import will create. A guard against a malformed or hostile file. */
-export const IMPORT_ITEM_LIMIT = 1000;
+/**
+ * The most stock lines an import will create: the same limit every Trader has. Anything past it in
+ * a file is dropped and counted, so the GM can be told.
+ */
+export const IMPORT_ITEM_LIMIT = MAX_STOCK_LINES;
 
 /* -------------------------------------------- */
 /*  Export                                      */
@@ -125,10 +128,10 @@ export function exportTrader(source, { moduleVersion = "", exportedAt = "" } = {
  * Errors are **localisation key suffixes** under `error.import.`, so the message a GM sees is
  * specific ("this file is from a newer version") rather than a generic failure.
  * @param {string|object} raw
- * @returns {{ok: boolean, error: string|null, trader: object|null, items: object[]}}
+ * @returns {{ok: boolean, error: string|null, trader: object|null, items: object[], dropped: number}}
  */
 export function parseTraderExport(raw) {
-  const fail = error => ({ ok: false, error, trader: null, items: [] });
+  const fail = error => ({ ok: false, error, trader: null, items: [], dropped: 0 });
 
   let data = raw;
   if ( typeof raw === "string" ) {
@@ -148,10 +151,10 @@ export function parseTraderExport(raw) {
   const name = typeof t.name === "string" ? t.name.trim() : "";
   if ( !name ) return fail("noName");
 
-  const items = (Array.isArray(data.items) ? data.items : [])
-    .slice(0, IMPORT_ITEM_LIMIT)
+  const usable = (Array.isArray(data.items) ? data.items : [])
     .map(exportItem)
     .filter(item => item && typeof item.name === "string" && item.name.trim());
+  const items = usable.slice(0, IMPORT_ITEM_LIMIT);
 
   return {
     ok: true,
@@ -167,7 +170,8 @@ export function parseTraderExport(raw) {
       attitudeGain: sanitizeGain(t.attitudeGain),
       currency: sanitizeCurrency(t.currency)
     },
-    items
+    items,
+    dropped: usable.length - items.length
   };
 }
 

@@ -188,7 +188,7 @@ export async function duplicateTrader(idOrUuid) {
  */
 export async function importTrader(raw) {
   const parsed = parseTraderExport(raw);
-  if ( !parsed.ok ) return { actor: null, error: parsed.error, items: 0 };
+  if ( !parsed.ok ) return { actor: null, error: parsed.error, items: 0, dropped: 0 };
 
   const { trader, items } = parsed;
   const folder = await traderFolder();
@@ -209,11 +209,11 @@ export async function importTrader(raw) {
   data.items = items;
 
   const actor = await Actor.create(data);
-  if ( !actor ) return { actor: null, error: "failed", items: 0 };
+  if ( !actor ) return { actor: null, error: "failed", items: 0, dropped: 0 };
   await appendToOrder(actor.id);
   log(`imported "${actor.name}" with ${actor.items.size} stock lines`);
   fireHook(HOOKS.traderCreated, { trader: actor });
-  return { actor, error: null, items: actor.items.size };
+  return { actor, error: null, items: actor.items.size, dropped: parsed.dropped };
 }
 
 /**

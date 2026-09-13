@@ -12,7 +12,7 @@ how much the Trader likes them. Buy, sell, or barter item-for-item; gold and goo
 sides, and the Trader's purse can run dry.
 
 > **Feature complete and verified.** See [docs/PLAN.md](docs/PLAN.md) for the design and
-> [docs/API.md](docs/API.md) for the module API. 369 unit tests and 532 end-to-end assertions
+> [docs/API.md](docs/API.md) for the module API. 373 unit tests and 546 end-to-end assertions
 > against a live Foundry world, run with a GM and two player clients joined at once.
 
 ## Requirements
@@ -26,6 +26,7 @@ sides, and the Trader's purse can run dry.
 
 - **Traders are Actors the module owns.** Stock is real dnd5e items, so prices, rarity,
   attunement and tooltips all come for free, and quantity is just the item's own quantity.
+  A Trader holds up to 150 different items; a stack of anything counts once.
 - **Attitude, 0 to 100, per character per Trader.** It moves prices, and it gates stock a Trader
   will only show once it trusts you. It drifts up as a character spends, and the GM can set it
   directly.

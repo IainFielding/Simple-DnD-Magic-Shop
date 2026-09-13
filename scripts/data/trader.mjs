@@ -1,10 +1,12 @@
 import {
-  HOOKS, MODULE_ID, PHYSICAL_TYPES, SETTINGS, fireCancellableHook, fireHook, log, setting
+  HOOKS, MAX_STOCK_LINES, MODULE_ID, PHYSICAL_TYPES, SETTINGS, fireCancellableHook, fireHook, log, setting
 } from "../config.mjs";
 import { clampAttitude, emptySpend, recordSpend, sanitizeSpend, adjustAttitude } from "./attitude.mjs";
 import { lockHaggle, sanitizeHaggleRecord } from "./haggle.mjs";
 import { defaultRestock, dueForRestock, restockPlan, sanitizeRestock } from "./restock.mjs";
-import { defaultBuyFilter, defaultLine, sanitizeBuyFilter, sanitizeLine, transferData } from "./stock.mjs";
+import {
+  defaultBuyFilter, defaultLine, sanitizeBuyFilter, sanitizeLine, stockRoom, transferData
+} from "./stock.mjs";
 import {
   expandPool, isHollowTemplate, madeIdentity, makeRandomEnchantedData, makeScrollData, materialise
 } from "./enchant.mjs";
@@ -409,11 +411,15 @@ export function addMadeStock(actor, data, options = {}) {
  * @param {object} [options]
  * @param {number} [options.qty]
  * @param {object} [options.line]
- * @returns {Promise<{created: object[], raised: object[], failed: string[]}>}
+ * Stops at {@link MAX_STOCK_LINES}. What is already stocked is still raised when the shelf is full —
+ * that takes no room — and what would need a new line is reported in `full` rather than created.
+ * @returns {Promise<{created: object[], raised: object[], failed: string[], full: string[]}>}
  */
 async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
   const created = [];
   const raised = [];
+  const full = [];
+  let room = stockRoom(stockEntries(actor).length);
 
   // Accumulated rather than appended, because one batch can name the same item more than once —
   // a generator drawing from overlapping packs, or a roll table with a repeated entry. Two
@@ -447,10 +453,14 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
 
   for ( const entry of sources ) {
     const made = entry.data ? madeIdentity(entry.data.flags?.[MODULE_ID]?.madeFrom) : "";
-    const identity = made || `${entry.item.type}:${entry.item.name}`;
+    // Ready-made data that was not made from anything (an API caller's own item data) is matched the
+    // way a hand-made item is: by its compendium source if it names one, else by type and name.
+    const subject = entry.item ?? entry.data;
+    const identity = made || `${subject.type}:${subject.name}`;
     const existing = made
       ? byMade.get(made)
-      : bySource.get(entry.uuid) ?? bySource.get(entry.item._stats?.compendiumSource) ?? byIdentity.get(identity);
+      : (entry.uuid && bySource.get(entry.uuid))
+        ?? bySource.get(subject._stats?.compendiumSource) ?? byIdentity.get(identity);
 
     if ( existing ) {
       // An unlimited line cannot be "raised" — there is nothing to add to — but it still counts
@@ -469,6 +479,12 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
       pending.flags[MODULE_ID].baseQty += qty;
       continue;
     }
+
+    if ( room <= 0 ) {
+      full.push(entry.data?.name ?? entry.item?.name ?? "");
+      continue;
+    }
+    room--;
 
     const source = entry.data ? structuredClone(entry.data) : entry.item.toObject();
     delete source._id;
@@ -501,8 +517,9 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
     if ( made.length < rows.length ) failed.push(...rows.slice(made.length).map(r => r.name));
   }
 
-  logTrader(actor, `stock added: ${created.length} new, ${raised.length} raised, ${failed.length} refused`);
-  return { created, raised, failed };
+  logTrader(actor, `stock added: ${created.length} new, ${raised.length} raised, ${failed.length} refused, `
+    + `${full.length} over the ${MAX_STOCK_LINES}-line limit`);
+  return { created, raised, failed, full };
 }
 
 /**
@@ -728,7 +745,7 @@ export async function applyArchetype(actor, archetype) {
  */
 export async function stockFromRecipe(actor, recipe, { rng = Math.random } = {}) {
   const r = sanitizeRecipe(recipe);
-  const empty = { picked: 0, shortfalls: {}, created: [], raised: [], failed: [], rejected: [] };
+  const empty = { picked: 0, shortfalls: {}, created: [], raised: [], failed: [], rejected: [], full: [] };
   if ( budgetTotal(r.budget) <= 0 ) return empty;
 
   const pool = filterPool(await stockPool(), {
@@ -750,7 +767,8 @@ export async function stockFromRecipe(actor, recipe, { rng = Math.random } = {})
     created: [...plain.created, ...made.created],
     raised: [...plain.raised, ...made.raised],
     failed: [...plain.failed, ...made.failed, ...unmade],
-    rejected: plain.rejected
+    rejected: plain.rejected,
+    full: [...plain.full, ...made.full]
   };
 }
 

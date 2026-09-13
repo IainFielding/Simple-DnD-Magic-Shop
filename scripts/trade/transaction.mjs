@@ -1,5 +1,5 @@
 import {
-  HOOKS, MODULE_ID, SETTINGS, fireCancellableHook, fireHook, log, setting, t
+  HOOKS, MAX_STOCK_LINES, MODULE_ID, SETTINGS, fireCancellableHook, fireHook, log, setting, t
 } from "../config.mjs";
 import { attitudeTier } from "../data/attitude.mjs";
 import {
@@ -7,10 +7,10 @@ import {
   totalCp
 } from "../data/pricing.mjs";
 import {
-  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible, transferData
+  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible, newLinesFromSale, transferData
 } from "../data/stock.mjs";
 import {
-  bookSpend, getAttitude, purse, recordTrade, stockLine, traderData
+  bookSpend, getAttitude, purse, recordTrade, stockEntries, stockLine, traderData
 } from "../data/trader.mjs";
 import { makeEntry } from "../data/ledger.mjs";
 import { serialised } from "../data/serial.mjs";
@@ -142,6 +142,18 @@ export function planTrade({ trader, actor, payer = actor, intent }) {
   }
 
   if ( !buying.length && !selling.length ) throw new Error(t("error.nothingStaged"));
+
+  // Room on the shelf for what is sold. Checked before anything is written, because a sale the
+  // Trader has no room for is a refusal, not a failure to roll back. Lines this deal empties are
+  // gone by the time the sold goods arrive, so they make room.
+  if ( selling.length ) {
+    const emptied = new Set(buying.filter(l => !l.unlimited && l.qty >= l.available).map(l => l.id));
+    const shelf = stockEntries(trader).filter(e => !emptied.has(e.id)).map(e => e.item);
+    const adding = newLinesFromSale(shelf, selling.map(l => l.item));
+    if ( adding > 0 && shelf.length + adding > MAX_STOCK_LINES ) {
+      throw new Error(t("error.shopFull", { name: trader.name, max: MAX_STOCK_LINES }));
+    }
+  }
 
   // The part of the purchase that trades at full value, which earns no goodwill.
   const fixedCostCp = buying.filter(l => l.fixed).reduce((sum, l) => sum + (l.unitCp * l.qty), 0);
@@ -417,7 +429,7 @@ async function deleteItems(owner, ids, journal, label) {
   const saved = ids.map(id => owner.items.get(id)?.toObject()).filter(Boolean);
   await owner.deleteEmbeddedDocuments("Item", ids);
   journal.record(`${label}: removed items on ${owner.name}`, async () => {
-    const back = await owner.createEmbeddedDocuments("Item", saved, { keepId: true });
+    const back = await owner.createEmbeddedDocuments("Item", saved, { keepId: true, [MODULE_ID]: { restoring: true } });
     // Refused as quietly as a grant can be; say so, so the GM is told what is still missing.
     if ( back.length !== saved.length ) throw new Error(`${saved.length - back.length} item(s) could not be restored`);
   });

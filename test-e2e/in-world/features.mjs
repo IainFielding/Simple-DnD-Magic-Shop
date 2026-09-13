@@ -411,6 +411,86 @@ export async function haggleSuite() {
   return report.summary;
 }
 
+/** A Trader holds at most 150 lines, whichever way stock arrives. */
+export async function stockLimitSuite() {
+  const report = new Report();
+  const mod = await load();
+  let trader; let seller; let imported;
+  try {
+    const rows = n => Array.from({ length: n }, (_, i) => ({
+      name: `${PREFIX} Crate ${i}`, type: "loot",
+      system: { quantity: 1, price: { value: 1, denomination: "gp" } }, flags: line()
+    }));
+    trader = await freshTrader(mod, { name: `${PREFIX} Crowded Shop`, gp: 1000, items: rows(148) });
+    report.equal("a Trader can hold 148 lines", mod.trader.stockEntries(trader).length, 148);
+
+    // Through the module: two fit, the third is reported rather than created.
+    const extra = ["Lantern", "Rope", "Tent"].map(name => ({
+      name: `${PREFIX} ${name}`, type: "loot", system: { quantity: 1, price: { value: 2, denomination: "gp" } }
+    }));
+    const added = await mod.trader.addMadeStock(trader, extra);
+    report.equal("adding three to 148 creates two", added.created.length, 2);
+    report.equal("and reports the one that did not fit", added.full.length, 1);
+    report.equal("leaving exactly 150 lines", mod.trader.stockEntries(trader).length, 150);
+
+    // Raising a line already stocked needs no room.
+    const raised = await mod.trader.addMadeStock(trader, [extra[0]]);
+    report.check("a full Trader still raises a line it already has", raised.raised.length === 1 && !raised.full.length,
+      JSON.stringify({ raised: raised.raised.length, full: raised.full.length }));
+
+    // Straight onto the actor sheet: the backstop refuses.
+    const direct = await trader.createEmbeddedDocuments("Item", [{
+      name: `${PREFIX} Smuggled Barrel`, type: "loot", system: { quantity: 1, price: { value: 1, denomination: "gp" } }
+    }]);
+    report.equal("an item dropped on a full Trader's sheet is refused", direct.length, 0);
+
+    // A character selling something new.
+    seller = await freshCharacter(`${PREFIX} Seller`, { gp: 50, items: [
+      { name: `${PREFIX} Odd Idol`, type: "loot", system: { quantity: 1, price: { value: 10, denomination: "gp" } } },
+      { name: `${PREFIX} Rope`, type: "loot", system: { quantity: 1, price: { value: 2, denomination: "gp" } } }
+    ] });
+    const ctx = mod.context.buildShopContext(trader, seller);
+    const idolLine = ctx.pack.find(l => l.name.includes("Odd Idol"));
+    report.check("the shop greys out something a full Trader has no room for", idolLine?.blocked === true, JSON.stringify(idolLine));
+    report.check("but not something it already stocks", ctx.pack.find(l => l.name.includes("Rope"))?.blocked === false);
+
+    const idol = named(seller, "Odd Idol");
+    await report.rejects("selling something new to a full Trader is refused", () => mod.transaction.settle({
+      trader, actor: seller, intent: { mode: "trade", buy: [], sell: [{ id: idol.id, qty: 1 }], goldCp: 0 }
+    }), /no room/);
+    const rope = named(seller, "Rope");
+    await mod.transaction.settle({
+      trader, actor: seller, intent: { mode: "trade", buy: [], sell: [{ id: rope.id, qty: 1 }], goldCp: 0 }
+    });
+    report.equal("selling something it already stocks merges into the line", mod.trader.stockEntries(trader).length, 150);
+
+    // Buying out a line in the same deal makes room for the new one.
+    const crate = named(trader, "Crate 0");
+    await mod.transaction.settle({
+      trader, actor: seller,
+      intent: { mode: "trade", buy: [{ id: crate.id, qty: 1 }], sell: [{ id: idol.id, qty: 1 }], goldCp: 0 }
+    });
+    report.check("buying the last of a line makes room for a sale in the same deal", !!named(trader, "Odd Idol"));
+    report.equal("and the shelves stay at 150", mod.trader.stockEntries(trader).length, 150);
+
+    // Import: a file with more than the limit arrives with the limit.
+    const file = api().exportTrader(trader.id);
+    file.trader.name = `${PREFIX} Crowded Copy`;
+    file.items.push(...rows(5).map(r => ({ ...r, name: `${r.name} (extra)` })));
+    const result = await mod.registry.importTrader(JSON.stringify(file));
+    imported = result.actor;
+    report.equal("an import keeps at most 150 lines", mod.trader.stockEntries(imported).length, 150);
+    report.equal("and says how many it left out", result.dropped, 5);
+  } catch ( err ) {
+    report.fail("stockLimitSuite threw", err);
+  } finally {
+    if ( trader ) await trader.delete().catch(() => {});
+    if ( imported ) await imported.delete().catch(() => {});
+    if ( seller ) await seller.delete().catch(() => {});
+  }
+  return report.summary;
+}
+
 /** Run every suite in this file. */
 export async function all() {
   const suites = {
@@ -419,7 +499,8 @@ export async function all() {
     fullValue: fullValueSuite,
     enchant: enchantSuite,
     generator: generatorSuite,
-    haggle: haggleSuite
+    haggle: haggleSuite,
+    stockLimit: stockLimitSuite
   };
   const out = {};
   for ( const [name, fn] of Object.entries(suites) ) {

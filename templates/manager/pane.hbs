@@ -164,6 +164,12 @@
         <i class="fa-solid fa-hand-pointer" aria-hidden="true"></i>
         {{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.dropHint"}}
       </p>
+      {{!-- How much room is left on the shelves. Worded rather than coloured alone. --}}
+      <p class="shop-stock-lines {{#if isFull}}is-full{{/if}}" aria-live="polite">
+        {{#if isFull}}<i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>{{/if}}
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.lines" count=lineCount max=maxLines}}
+        {{#if isFull}}— {{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.fullNote"}}{{/if}}
+      </p>
       <div class="shop-stock-actions">
         <button type="button" class="shop-btn" data-action="addFromCompendium">
           <i class="fa-solid fa-magnifying-glass"></i>

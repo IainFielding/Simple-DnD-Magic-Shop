@@ -70,7 +70,7 @@
       "copyName": "{name} (Copy)",
       "folderName": "Traders",
       "noTraders": "No Traders yet.",
-      "stockCount": "{count} lines",
+      "stockCount": "{count} of {max} lines",
       "duplicate": "Duplicate this Trader, without its opinion of anyone",
       "emptyHeading": "No Traders yet",
       "emptyBody": "Create a Trader to give it stock, a purse, and an opinion of your players.",
@@ -120,7 +120,10 @@
         "browse": "Browse compendiums",
         "clear": "Empty shelves",
         "clearTitle": "Empty the shelves",
-        "clearBody": "Remove all {count} lines from <strong>{name}</strong>? This cannot be undone."
+        "clearBody": "Remove all {count} lines from <strong>{name}</strong>? This cannot be undone.",
+        "lines": "{count} of {max} lines",
+        "fullNote": "the shelves are full. Remove a line to add another.",
+        "full": "{count} item(s) not added: a Trader holds at most {max} lines."
       },
       "generate": {
         "toggle": "Generate",
@@ -228,7 +231,8 @@
         "title": "Import a Trader",
         "body": "Choose a Trader file exported from this module. The Trader arrives with its stock, purse and settings, and no memory of anyone.",
         "button": "Import",
-        "done": "Imported {name} with {count} stock lines."
+        "done": "Imported {name} with {count} stock lines.",
+        "dropped": "{count} stock line(s) in the file were left out: a Trader holds at most {max} lines."
       },
       "ledger": {
         "show": "Show",
@@ -296,7 +300,8 @@
       "notPhysical": "This Trader deals in goods, not that.",
       "unpriced": "Nobody can put a price on this.",
       "wrongType": "This Trader does not deal in these.",
-      "wrongRarity": "This Trader has no interest in something like this."
+      "wrongRarity": "This Trader has no interest in something like this.",
+      "shopFull": "Their shelves are full; they only buy what they already stock."
     },
     "pricing": {
       "error": {
@@ -431,7 +436,8 @@
       "haggleRefused": "They will not hear it right now.",
       "haggleNoRoll": "The check could not be rolled.",
       "cannotEnchant": "That enchantment cannot go on that item.",
-      "cannotScroll": "A scroll could not be made from that."
+      "cannotScroll": "A scroll could not be made from that.",
+      "shopFull": "{name} has no room on the shelves for more kinds of goods (at most {max} lines)."
     },
     "archetype": {
       "builtIn": {

@@ -16,6 +16,18 @@
  */
 export const MODULE_ID = "sogrom-simple-dnd5e-magic-shop";
 
+/**
+ * The most stock lines one Trader may hold — distinct items on its shelves, not their quantities: a
+ * stack of twenty arrows is one line.
+ *
+ * Every line is an embedded item on the Trader actor, and Foundry sends the whole actor to every
+ * client and re-sends it on every change. A shop of hundreds of lines makes each purchase heavier
+ * for the whole table and fills a shelf no player can take in anyway. Enforced on every route in:
+ * the manager, the generator, roll tables, the API, import, a character selling something new, and
+ * an item dropped straight onto the Trader's actor sheet.
+ */
+export const MAX_STOCK_LINES = 150;
+
 /** The dnd5e item types a Trader can stock: priced physical gear. Mirrors the system's own list. */
 export const PHYSICAL_TYPES = ["weapon", "equipment", "consumable", "tool", "container", "loot"];
 

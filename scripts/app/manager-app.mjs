@@ -1,5 +1,5 @@
 import {
-  MODULE_ID, PHYSICAL_TYPES, PRICING_PRESETS, SETTINGS, normalizeRarity, setting, tpl, t, log
+  MAX_STOCK_LINES, MODULE_ID, PHYSICAL_TYPES, PRICING_PRESETS, SETTINGS, normalizeRarity, setting, tpl, t, log
 } from "../config.mjs";
 import { attitudeTier } from "../data/attitude.mjs";
 import { RESTOCK_MODES, daysUntilRestock } from "../data/restock.mjs";
@@ -232,6 +232,7 @@ export class TraderManagerApp extends ShopShellBase {
       img: actor.img,
       active: actor.id === this.#selected,
       stockCount: entries.length,
+      maxLines: MAX_STOCK_LINES,
       purse: formatCp(this.#purseCp(actor))
     };
   }
@@ -601,6 +602,9 @@ export class TraderManagerApp extends ShopShellBase {
     return {
       rows,
       hasRows: rows.length > 0,
+      lineCount: rows.length,
+      maxLines: MAX_STOCK_LINES,
+      isFull: rows.length >= MAX_STOCK_LINES,
       // Worded from the Trader's side, matching the column: it buys at the character's sell
       // multiplier and sells at their buy multiplier.
       previewNote: t("manager.stock.previewNote", {
@@ -839,10 +843,13 @@ export class TraderManagerApp extends ShopShellBase {
   }
 
   /** One report for a batch of added stock, then show the Stock tab it landed in. */
-  #reportAdded({ created, raised, failed, rejected }) {
+  #reportAdded({ created, raised, failed, rejected, full = [] }) {
     ui.notifications.info(t("manager.generate.added", {
       created: created.length, raised: raised.length
     }));
+    if ( full.length ) {
+      ui.notifications.warn(t("manager.stock.full", { count: full.length, max: MAX_STOCK_LINES }));
+    }
     if ( rejected.length ) {
       // Overwhelmingly a roll table that also rolls spells or features. Naming them beats a bare
       // count, because the GM's next move is to fix the table.
@@ -1274,7 +1281,8 @@ export class TraderManagerApp extends ShopShellBase {
     // two things that one does: recording where the item came from (without which a receipt has
     // nothing durable to link) and raising an existing line instead of adding a second row for
     // the same thing.
-    const { created, raised } = await addStockItems(trader, [item.uuid], { synthesize: false });
+    const { created, raised, full } = await addStockItems(trader, [item.uuid], { synthesize: false });
+    if ( full.length ) return void ui.notifications.warn(t("manager.stock.full", { count: 1, max: MAX_STOCK_LINES }));
     const landed = created[0] ?? raised[0];
     if ( !landed ) return void ui.notifications.warn(t("manager.stock.dropNotItem"));
 
@@ -1581,12 +1589,13 @@ export class TraderManagerApp extends ShopShellBase {
       return void ui.notifications.warn(t("error.import.unreadable"));
     }
 
-    const { actor, error, items } = await importTrader(text);
+    const { actor, error, items, dropped } = await importTrader(text);
     if ( error ) return void ui.notifications.warn(t(`error.import.${error}`));
 
     this.#selected = actor.id;
     this.#tab = "identity";
     ui.notifications.info(t("manager.import.done", { name: actor.name, count: items }));
+    if ( dropped ) ui.notifications.warn(t("manager.import.dropped", { count: dropped, max: MAX_STOCK_LINES }));
     this.render();
   }
 

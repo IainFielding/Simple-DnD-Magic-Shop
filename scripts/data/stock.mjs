@@ -1,4 +1,4 @@
-import { FIXED_VALUE_LOOT, PHYSICAL_TYPES, RARITIES, clamp, normalizeRarity } from "../config.mjs";
+import { FIXED_VALUE_LOOT, MAX_STOCK_LINES, PHYSICAL_TYPES, RARITIES, clamp, normalizeRarity } from "../config.mjs";
 import { copperPerUnit, itemValueCp, toCopper } from "./pricing.mjs";
 
 /**
@@ -125,6 +125,41 @@ export function availableQty(item, line) {
   if ( sanitizeLine(line).unlimited ) return Infinity;
   const qty = Number(item?.system?.quantity);
   return Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 0;
+}
+
+/* -------------------------------------------- */
+/*  Shelf space (pure)                          */
+/* -------------------------------------------- */
+
+/**
+ * How many more lines a Trader has room for. Never negative: a Trader from before the limit that
+ * holds more than it keeps what it has, and simply takes no new lines until it is under.
+ * @param {number} lineCount
+ * @param {number} [max]
+ * @returns {number}
+ */
+export function stockRoom(lineCount, max = MAX_STOCK_LINES) {
+  return Math.max(0, max - Math.max(0, Math.floor(Number(lineCount) || 0)));
+}
+
+/**
+ * How many new lines a sale would add to a Trader's shelves.
+ *
+ * A sold item merges into a line of the same type and name (see `trade/transaction.mjs`), so only
+ * the goods the Trader does not already stock take up room — and two of the same thing sold in one
+ * deal take up one.
+ * @param {{type: string, name: string}[]} shelf    What stays on the shelf.
+ * @param {{type: string, name: string}[]} selling  What the character is handing over.
+ * @returns {number}
+ */
+export function newLinesFromSale(shelf, selling) {
+  const have = new Set((shelf ?? []).map(i => `${i.type}:${i.name}`));
+  const added = new Set();
+  for ( const item of selling ?? [] ) {
+    const key = `${item.type}:${item.name}`;
+    if ( !have.has(key) ) added.add(key);
+  }
+  return added.size;
 }
 
 /* -------------------------------------------- */

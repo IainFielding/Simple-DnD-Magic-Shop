@@ -12,7 +12,7 @@
  */
 
 import {
-  MODULE_ID, SETTINGS, DEFAULTS, DISPLAY_MODES, PRICING_PRESETS, HOOKS,
+  MAX_STOCK_LINES, MODULE_ID, SETTINGS, DEFAULTS, DISPLAY_MODES, PRICING_PRESETS, HOOKS,
   ATTITUDE_MIN, ATTITUDE_MAX, fireHook, tpl, t, log, setting
 } from "./config.mjs";
 import { TraderManagerApp } from "./app/manager-app.mjs";
@@ -21,7 +21,7 @@ import { watchForeignWindows } from "./app/takeover.mjs";
 import { ShopApp } from "./app/shop-app.mjs";
 import { registerQueries } from "./trade/queries.mjs";
 import { claim, greet, registerClaims } from "./trade/claim.mjs";
-import { sweepRestocks } from "./data/trader.mjs";
+import { isStockItem, isTrader, sweepRestocks, stockEntries } from "./data/trader.mjs";
 import { registerApi } from "./api.mjs";
 // Imported for its side effect: the file declares the shop-context query at module scope.
 // Without this import nothing would ever register it, and a player's shop would find no
@@ -56,6 +56,18 @@ Hooks.once("init", () => {
   // render since the world loaded, which is how it tells an opening window from a
   // re-render — see app/takeover.mjs.
   watchForeignWindows();
+
+  // The stock limit's backstop. Every route the module owns checks the limit itself and says what
+  // did not fit; this catches the one it does not own — an item dropped straight onto a Trader's
+  // actor sheet. A batch creation is checked against the count before it, which is why the module's
+  // own routes cannot rely on this alone. Restores during a rolled-back trade pass through.
+  Hooks.on("preCreateItem", (item, _data, options) => {
+    const actor = item.parent;
+    if ( !isTrader(actor) || !isStockItem(item) || options?.[MODULE_ID]?.restoring ) return;
+    if ( stockEntries(actor).length < MAX_STOCK_LINES ) return;
+    ui.notifications.warn(t("manager.stock.full", { count: 1, max: MAX_STOCK_LINES }));
+    return false;
+  });
 
   // Partials included by other templates must be registered up front: a partial is resolved
   // from the Handlebars registry at render time, not fetched on demand.
