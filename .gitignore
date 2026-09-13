@@ -4,6 +4,9 @@ docs/
 # Dev tooling — not part of the shipped module archive.
 node_modules/
 
+# Release build output — `npm run package` and CI write the archive here.
+dist/
+
 # Test / tooling output
 coverage/
 .vitest/

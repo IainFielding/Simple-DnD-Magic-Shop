@@ -24,7 +24,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** Every `.mjs` we ship or lint, excluding dependencies. */
 async function scripts(dir, out = []) {
   for ( const entry of await readdir(dir, { withFileTypes: true }) ) {
-    if ( entry.name === "node_modules" || entry.name.startsWith(".") ) continue;
+    // `dist` holds a built copy of the module; scanning it would report everything twice.
+    if ( ["node_modules", "dist"].includes(entry.name) || entry.name.startsWith(".") ) continue;
     const path = join(dir, entry.name);
     if ( entry.isDirectory() ) await scripts(path, out);
     else if ( extname(entry.name) === ".mjs" ) out.push(path);

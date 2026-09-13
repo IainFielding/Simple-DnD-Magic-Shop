@@ -34,7 +34,8 @@ const foundryGlobals = {
 export default [
   // `**/` matters: `test-e2e/` carries its own node_modules (Playwright), and a root-anchored
   // pattern would leave every dependency in it to be linted.
-  { ignores: ["**/node_modules/**"] },
+  // `dist/` is a built copy of the module (`npm run package`), not source.
+  { ignores: ["**/node_modules/**", "dist/**"] },
   js.configs.recommended,
   {
     files: ["scripts/**/*.mjs", "tools/**/*.mjs"],

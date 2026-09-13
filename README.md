@@ -1,3 +1,7 @@
+![](https://img.shields.io/badge/Foundry-v14.367-informational) 
+![](https://img.shields.io/badge/D&D-v6.0.1-informational)
+![Latest Release Download Count](https://img.shields.io/github/downloads/IainFielding/Simple-DnD-Magic-Shop/latest/module.zip?label=Downloads) [![Ko-fi](https://img.shields.io/badge/Ko--fi-sogrom?logo=ko-fi&logoColor=white)](https://ko-fi.com/sogrom)<br>
+
 # Simple D&D Magic Shop
 
 Traders your players can actually haggle with, for Foundry VTT and the D&D 5e system.

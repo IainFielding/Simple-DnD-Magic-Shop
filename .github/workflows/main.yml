@@ -1,0 +1,83 @@
+# Release: build the module archive and attach it to a published GitHub release.
+#
+# To release:
+#   1. Run the end-to-end harness locally (cd test-e2e && npm test) — CI cannot.
+#   2. On GitHub, draft a release with a new tag: "v1.2.3" or "1.2.3" (a "-beta.1" style suffix
+#      is fine), and publish it.
+#   3. This workflow runs CI against the tagged commit, builds, verifies, and attaches
+#      module.json and module.zip to the release.
+#   4. Update the module's entry at https://foundryvtt.com/admin with the release's manifest.
+#
+# Only a *published* release triggers this. Pushing a tag on its own does not, and editing a
+# release that is already published does not rebuild it — publish a new version instead.
+#
+# The manifest URL every install checks for updates is
+#   https://github.com/<owner>/<repo>/releases/latest/download/module.json
+# which GitHub resolves to the newest non-prerelease. It must never change, or existing installs
+# stop seeing updates. A prerelease is therefore not offered to them, which is what you want.
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  # The whole of CI, against the tagged commit. Nothing is built from a commit that fails it.
+  check:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # "v1.2.3" and "1.2.3" both become "1.2.3". Anything that is not semver after that is
+      # refused here rather than published as a version Foundry will compare wrongly.
+      - name: Read Version From Tag
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${TAG#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag \"$TAG\" is not a version. Use v1.2.3 or 1.2.3."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build Module Archive
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: node tools/build-release.mjs --version="$VERSION" --repo="$REPO" --tag="$TAG"
+
+      # Verify the archive as a user will receive it: unpacked by a different zip reader, with
+      # every loaded file present and real release values in the manifest.
+      - name: Verify Module Archive
+        run: |
+          unzip -tq dist/module.zip
+          unzip -q dist/module.zip -d dist/unpacked
+          node tools/validate-package.mjs --root=dist/unpacked --release
+          cmp dist/module.json dist/unpacked/module.json
+
+      # `--clobber` so re-running a failed workflow replaces a partial upload instead of failing
+      # on the file that did make it.
+      - name: Attach Files To Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/module.json dist/module.zip --clobber --repo "${{ github.repository }}"
