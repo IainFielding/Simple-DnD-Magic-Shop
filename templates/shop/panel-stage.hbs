@@ -12,8 +12,69 @@
 
   In **barter** mode the same two columns are weighed against each other instead, with a coin
   field to balance the difference.
+
+  With **history** toggled on, the counter gives way to this character's past dealings with the
+  Trader. The staged lines are kept, not cleared: looking up what you paid last time is a pause in
+  a deal, not the end of one.
 --}}
-<section class="shop-panel shop-panel--stage">
+<section class="shop-panel shop-panel--stage {{#if showHistory}}is-history{{/if}}">
+
+  {{#if showHistory}}
+  <div class="shop-stage-col shop-history">
+    <header class="shop-panel-head shop-panel-head--stage">
+      <h2>{{localize "sogrom-simple-dnd5e-magic-shop.shop.historyHeading"}}</h2>
+      <span class="shop-stage-total">{{localize "sogrom-simple-dnd5e-magic-shop.shop.historyCount" count=history.length}}</span>
+    </header>
+    <div class="shop-panel-body">
+      {{#if history.length}}
+      <ol class="shop-history-list">
+        {{#each history}}
+        <li class="shop-history-entry">
+          <div class="shop-history-head">
+            <span class="shop-history-when">{{when}}</span>
+            <span class="shop-history-net">
+              {{#if paid}}
+                {{> shopCoin value=paid label=(localize "sogrom-simple-dnd5e-magic-shop.ledger.paid")}}
+              {{else if received}}
+                {{> shopCoin value=received tone="good" label=(localize "sogrom-simple-dnd5e-magic-shop.ledger.received")}}
+              {{else}}
+                <span class="shop-history-even">{{localize "sogrom-simple-dnd5e-magic-shop.receipt.evenSwap"}}</span>
+              {{/if}}
+            </span>
+          </div>
+          <ul class="shop-history-lines">
+            {{#each bought}}
+            <li><i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+              <span class="shop-sr-only">{{localize "sogrom-simple-dnd5e-magic-shop.receipt.bought"}}</span>
+              {{name}}{{#if qty}} &times;{{qty}}{{/if}}</li>
+            {{/each}}
+            {{#each sold}}
+            <li class="is-sold"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+              <span class="shop-sr-only">{{localize "sogrom-simple-dnd5e-magic-shop.receipt.sold"}}</span>
+              {{name}}{{#if qty}} &times;{{qty}}{{/if}}</li>
+            {{/each}}
+          </ul>
+          {{#if payerName}}
+          <span class="shop-history-note">
+            <i class="fa-solid fa-people-group" aria-hidden="true"></i>
+            {{localize "sogrom-simple-dnd5e-magic-shop.receipt.paidFrom" name=payerName}}
+          </span>
+          {{/if}}
+          {{#if attitudeGained}}
+          <span class="shop-history-note">
+            <i class="fa-solid fa-face-smile" aria-hidden="true"></i>
+            {{localize "sogrom-simple-dnd5e-magic-shop.ledger.goodwill" points=attitudeGained}}
+          </span>
+          {{/if}}
+        </li>
+        {{/each}}
+      </ol>
+      {{else}}
+      <p class="shop-stage-empty">{{localize "sogrom-simple-dnd5e-magic-shop.shop.historyEmpty"}}</p>
+      {{/if}}
+    </div>
+  </div>
+  {{else}}
 
   <div class="shop-stage-col">
     <header class="shop-panel-head shop-panel-head--stage">
@@ -79,4 +140,5 @@
       {{/if}}
     </div>
   </div>
+  {{/if}}
 </section>

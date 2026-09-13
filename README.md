@@ -39,6 +39,14 @@ sides, and the Trader's purse can run dry.
 - **Trade and Barter.** Gold on one side, or goods against goods with coin balancing the
   difference. A sale and a purchase settle together, so trading the old sword toward the new one
   works even when the purse alone could not cover it.
+- **Pay from the party fund.** A character in a dnd5e Group can pay from the Group's purse, when
+  their player owns the Group. The GM grants that with ordinary Foundry ownership.
+- **A ledger for every Trader.** Every settled trade is recorded: the GM sees all of them in the
+  Trader Manager, and a player's shop shows them their own dealings with that Trader.
+- **Archetypes.** Start a Trader as a Blacksmith, Apothecary, Arcanist, Fence or one of the other
+  built-ins, stock its shelves in the same click, or save your own Trader as an archetype.
+- **Export and import.** Download a Trader, stock and all, and import it into another world. What
+  it thinks of your players, and its ledger, stay behind.
 
 ## Settings
 

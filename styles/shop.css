@@ -118,6 +118,9 @@
      counter — a layout that reflows while you are clicking is a layout that moves the thing you
      were about to click next. */
   --shop-stage-w: 232px;
+  /* The two portraits in the shop's top bar — who you are, and who you are dealing with. Large,
+     because the Trader is a character the GM has dressed, not an icon. */
+  --shop-portrait: 300px;
 
   color: var(--shop-text);
   font-family: var(--shop-font-body);
@@ -409,6 +412,9 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   color: var(--shop-muted);
 }
 
+.sogrom-shop .shop-rail-actions { display: flex; align-items: stretch; gap: 0.4rem; }
+.sogrom-shop .shop-rail-actions .shop-btn { flex: 1; }
+
 .sogrom-shop .shop-rail-empty {
   padding: 1rem;
   margin: 0;
@@ -698,6 +704,11 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   justify-content: flex-start;
   align-items: center;
   gap: 0.6rem;
+  /* Foundry gives buttons a fixed height, so a row whose text grew taller than that — a wider
+     typeface, a long purse figure wrapping — spilled over the row beneath it. The row sizes to
+     its content instead. */
+  height: auto;
+  min-height: 0;
   padding: 0.45rem 0.5rem;
   background: none;
   border: none;
@@ -733,7 +744,16 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   white-space: nowrap;
 }
 
-.sogrom-shop .shop-rail-meta { font-size: 0.7rem; color: var(--shop-muted); }
+/* One line, like the name above it: a Trader with a large purse ellipsises rather than wrapping
+   into a second line that makes its row taller than every other. */
+.sogrom-shop .shop-rail-meta {
+  max-width: 100%;
+  font-size: 0.7rem;
+  color: var(--shop-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sogrom-shop .shop-rail-dot { margin: 0 0.25rem; }
 
 /* The row tools stay hidden until the row is hovered or holds focus. Two destructive-ish
@@ -986,6 +1006,69 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   border-radius: var(--shop-radius);
 }
 
+/* ---------------------------------------------- Archetypes (Identity pane)
+
+   The chosen archetype is spelled out as a short fact list before Apply is pressed, so the card
+   reads like a label on a jar rather than a form: term on the left, what it means beside it. */
+.sogrom-shop .shop-archetype-card {
+  display: flex;
+  gap: 0.8rem;
+  padding: 0.6rem 0.7rem;
+  background: var(--shop-sunk);
+  border: 1px solid var(--shop-line);
+  border-radius: var(--shop-radius);
+}
+
+.sogrom-shop .shop-archetype-icon {
+  flex: 0 0 auto;
+  width: 2rem;
+  font-size: 1.4rem;
+  text-align: center;
+  color: var(--shop-settled);
+}
+
+.sogrom-shop .shop-archetype-body { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+
+.sogrom-shop .shop-archetype-name {
+  font-family: var(--shop-font-heading);
+  font-size: 0.9rem;
+  color: var(--shop-bright);
+}
+
+.sogrom-shop .shop-archetype-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.15rem 0.8rem;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.sogrom-shop .shop-archetype-facts dt {
+  font-family: var(--shop-font-heading);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--shop-muted);
+  padding-top: 0.12rem;
+}
+
+.sogrom-shop .shop-archetype-facts dd { margin: 0; }
+
+/* ---------------------------------------------- Ledger pane */
+
+.sogrom-shop .shop-ledger { display: flex; flex-direction: column; gap: 0.6rem; }
+.sogrom-shop .shop-ledger-summary { flex: 1 1 24ch; margin: 0; font-size: 0.8rem; color: var(--shop-muted); }
+.sogrom-shop .shop-ledger-table td { vertical-align: top; }
+.sogrom-shop .shop-ledger-when { white-space: nowrap; font-size: 0.76rem; }
+.sogrom-shop .shop-ledger-when .shop-stock-type,
+.sogrom-shop .shop-ledger-table td .shop-stock-type { display: block; }
+.sogrom-shop .shop-ledger-who { color: var(--shop-bright); }
+.sogrom-shop .shop-ledger-line { display: block; line-height: 1.3; }
+.sogrom-shop .shop-ledger-line .shop-stock-type { display: inline; }
+.sogrom-shop .shop-ledger-coin { white-space: nowrap; font-family: var(--shop-font-heading); font-size: 0.78rem; }
+.sogrom-shop .shop-ledger-coin .is-good { color: var(--shop-credit); }
+.sogrom-shop .shop-faint { color: var(--shop-faint); }
+
 .sogrom-shop .shop-stock-name { min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
 .sogrom-shop .shop-stock-item:hover .shop-stock-name { text-decoration: underline; }
 .sogrom-shop .shop-stock-type { font-size: 0.7rem; color: var(--shop-muted); }
@@ -1033,7 +1116,8 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
 .sogrom-shop .shop-stock-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 
 /* A toggle that is currently on. Brass, because it is a state the GM has committed to. */
-.sogrom-shop .shop-btn.is-on {
+.sogrom-shop .shop-btn.is-on,
+.sogrom-shop .shop-icon-btn.is-on {
   border-color: var(--shop-settled);
   background: var(--shop-settled-soft);
   color: var(--shop-bright);
@@ -1209,9 +1293,17 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
 .sogrom-shop .shop-party--trader { justify-content: flex-end; }
 .sogrom-shop .shop-party--trader .shop-party-main { text-align: right; align-items: flex-end; }
 
+.sogrom-shop .shop-party-portrait {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  line-height: 0;
+}
+
 .sogrom-shop .shop-party-img {
-  width: 46px;
-  height: 46px;
+  display: block;
+  width: var(--shop-portrait);
+  height: var(--shop-portrait);
   flex: 0 0 auto;
   object-fit: cover;
   border: 1px solid var(--shop-line-2);
@@ -1228,6 +1320,22 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Which purse pays: only rendered when the character can draw on a Group. Sized like the panel
+   type filters, so it reads as a quiet choice under the name rather than a form field. */
+.sogrom-shop .shop-payer {
+  width: auto;
+  max-width: 14rem;
+  height: auto;
+  padding: 0.1rem 0.35rem;
+  background: var(--shop-bg);
+  border: 1px solid var(--shop-line);
+  border-radius: var(--shop-radius);
+  color: var(--shop-text);
+  font-family: var(--shop-font-body);
+  font-size: 0.74rem;
+}
+.sogrom-shop .shop-payer option { background: var(--shop-sunk); color: var(--shop-text); }
 
 .sogrom-shop .shop-topbar-centre {
   display: flex;
@@ -1321,6 +1429,21 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   font-family: var(--shop-font-body);
   font-size: 0.78rem;
 }
+
+/* The item type dropdown, matched to the search box beside it. */
+.sogrom-shop .shop-panel-head .shop-type-filter {
+  width: auto;
+  max-width: 11rem;
+  height: auto;
+  padding: 0.2rem 0.4rem;
+  background: var(--shop-bg);
+  border: 1px solid var(--shop-line);
+  border-radius: var(--shop-radius);
+  color: var(--shop-text);
+  font-family: var(--shop-font-body);
+  font-size: 0.78rem;
+}
+.sogrom-shop .shop-type-filter option { background: var(--shop-sunk); color: var(--shop-text); }
 
 /* Each panel scrolls on its own, so the chrome band and the footer never move. */
 .sogrom-shop .shop-panel-body {
@@ -1438,6 +1561,59 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   color: var(--shop-faint);
   text-align: center;
 }
+
+/* ---------------------------------------------- Your dealings (history in place of the counter)
+
+   One column instead of two: a history is read down, not weighed side against side. Each entry
+   is a quiet card rather than a staged row — nothing here is on the counter, so nothing wears the
+   brass that means "committed". */
+.sogrom-shop .shop-panel--stage.is-history { grid-template-columns: minmax(0, 1fr); }
+
+.sogrom-shop .shop-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sogrom-shop .shop-history-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--shop-panel);
+  border: 1px solid var(--shop-line);
+  border-radius: var(--shop-radius);
+}
+
+.sogrom-shop .shop-history-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.sogrom-shop .shop-history-when { font-size: 0.7rem; color: var(--shop-muted); }
+.sogrom-shop .shop-history-even { font-size: 0.72rem; font-style: italic; color: var(--shop-faint); }
+
+.sogrom-shop .shop-history-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.74rem;
+}
+
+.sogrom-shop .shop-history-lines li { display: flex; align-items: baseline; gap: 0.35rem; min-width: 0; }
+.sogrom-shop .shop-history-lines i { font-size: 0.65rem; color: var(--shop-muted); }
+.sogrom-shop .shop-history-lines li.is-sold i { color: var(--shop-credit); }
+
+.sogrom-shop .shop-history-note { font-size: 0.68rem; color: var(--shop-muted); }
+.sogrom-shop .shop-history-note i { margin-right: 0.2rem; }
 
 /* A bare `<input type="number">` has an intrinsic width of ~177px in Chrome, which is wider
    than this column — enough on its own to push the barter side out. Pinned to the column. */
@@ -1679,7 +1855,8 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   margin-right: auto;
 }
 
-.sogrom-shop-receipt-attitude { font-size: 0.76rem; opacity: 0.85; }
+.sogrom-shop-receipt-attitude,
+.sogrom-shop-receipt-payer { font-size: 0.76rem; opacity: 0.85; }
 
 /* ---------------------------------------------- Narrow viewports
 
@@ -1691,6 +1868,10 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
 }
 
 @media (max-width: 1100px) {
+  /* Two 300px portraits plus the attitude meter between them no longer fit across the bar, and
+     every pixel the bar grows is taken from the panels below it. */
+  .sogrom-shop { --shop-portrait: 160px; }
+
   /* Two columns rather than four: the shelves and the pack side by side on the first row, the
      counter spanning both beneath them. Below this width four tile columns leave each one too
      narrow for a single tile. */

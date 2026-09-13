@@ -69,6 +69,9 @@ export async function receiptContext(receipt) {
     receivedCp,
     paid: formatCp(paidCp),
     received: formatCp(receivedCp),
+    // Named only when a Group's purse moved, so the party can see the fund was used — and by
+    // whom, which is the question a shared purse always raises.
+    payerName: receipt.payer && receipt.payer.id !== receipt.actor.id ? receipt.payer.name : "",
     // Only surfaced when goodwill actually moved: "+0 attitude" on every purchase would be
     // noise, and this is the line a player most wants to see.
     attitudeGained: receipt.attitudeGained > 0 ? receipt.attitudeGained : 0,

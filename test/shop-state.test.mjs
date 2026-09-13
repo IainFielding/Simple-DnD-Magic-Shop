@@ -124,6 +124,27 @@ describe("ShopState.adopt", () => {
   });
 });
 
+describe("ShopState type filter", () => {
+  it("keeps a chosen type while the panel still holds it", () => {
+    const state = new ShopState();
+    state.category.stock = "weapon:simpleM";
+    state.adopt(context({ stock: [stockLine("dagger", 200, 1, { subtype: "simpleM" })] }));
+    expect(state.category.stock).toBe("weapon:simpleM");
+  });
+
+  it("falls back to all items when the last item of the chosen type has gone", () => {
+    const state = new ShopState();
+    state.category.stock = "weapon";
+    state.category.pack = "loot:gem";
+    state.adopt(context({
+      stock: [stockLine("rope", 100, 1, { type: "loot" })],
+      pack: [packLine("ruby", 500, 1, { type: "loot", subtype: "gem" })]
+    }));
+    expect(state.category.stock).toBe("");
+    expect(state.category.pack).toBe("loot:gem");
+  });
+});
+
 describe("ShopState totals in trade mode", () => {
   let state;
 
@@ -338,5 +359,52 @@ describe("ShopState.intent", () => {
 
     state.mode = "barter";
     expect(state.intent().goldCp).toBe(500);
+  });
+});
+
+describe("ShopState paying from a Group", () => {
+  /** A context where the character is broke and the party fund is not — or the other way round. */
+  const groupPaying = ({ own = 0, party = 5000, partyCoins = { pp: 0, gp: 50, ep: 0, sp: 0, cp: 0 } } = {}) => {
+    const ctx = context({ stock: [stockLine("sword", 1000, 3)], purseCp: own });
+    ctx.actor.currency = { pp: 0, gp: own / 100, ep: 0, sp: 0, cp: 0 };
+    ctx.purse = { id: "party", name: "The Company", own: false, purseCp: party, currency: partyCoins };
+    return ctx;
+  };
+
+  it("reads the purse it pays from, falling back to the character for an older payload", () => {
+    const state = new ShopState();
+    state.adopt(groupPaying());
+    expect(state.purse.id).toBe("party");
+
+    state.adopt(context({ stock: [stockLine("sword")] }));
+    expect(state.purse.id).toBe("a1");
+  });
+
+  it("judges a cash trade against the Group's purse, not the character's", () => {
+    const state = new ShopState();
+    state.adopt(groupPaying({ own: 0, party: 5000 }));
+    state.stage("take", "sword", 1);
+    expect(state.totals().affordable).toBe(true);
+
+    state.adopt(groupPaying({ own: 100_000, party: 0 }));
+    expect(state.totals().affordable).toBe(false);
+  });
+
+  it("caps barter coins at what the Group holds", () => {
+    const state = new ShopState();
+    state.adopt(groupPaying({ partyCoins: { pp: 1, gp: 0, ep: 0, sp: 0, cp: 0 } }));
+    expect(state.setCoin("pp", 5)).toBe(1);
+    expect(state.setCoin("gp", 5)).toBe(0);
+  });
+
+  it("re-clamps staged coins when the paying purse changes under them", () => {
+    const state = new ShopState();
+    state.adopt(groupPaying({ partyCoins: { pp: 0, gp: 50, ep: 0, sp: 0, cp: 0 } }));
+    state.setCoin("gp", 40);
+    // The player switches back to their own, much lighter, purse.
+    const own = groupPaying();
+    own.purse = { id: "a1", own: true, purseCp: 1000, currency: { pp: 0, gp: 10, ep: 0, sp: 0, cp: 0 } };
+    state.adopt(own);
+    expect(state.coins).toEqual({ gp: 10 });
   });
 });

@@ -200,6 +200,8 @@ export const SETTINGS = {
   attitudeGainPerPoint: "attitudeGainPerPoint",
   /** Most attitude a single visit can earn, however much is spent. */
   attitudeGainCap: "attitudeGainCap",
+  /** Hidden. The GM's own saved archetypes; the built-in ones live in `data/archetypes.mjs`. */
+  archetypes: "archetypes",
   debug: "debugLogging"
 };
 
@@ -261,6 +263,7 @@ export const DEFAULTS = {
   // few points a session; a party buying a keep's worth of plate will shift it a lot.
   attitudeGainPerPoint: 10_000,
   attitudeGainCap: 5,
+  archetypes: { list: [] },
   debug: false
 };
 
@@ -323,6 +326,15 @@ export function pricingAnchors() {
  */
 export function fullscreen() {
   return setting(SETTINGS.displayMode) !== "windowed";
+}
+
+/**
+ * Whether the Ember module is active in this world. When it is, both windows wear Ember's look
+ * (the `sogrom-ember` class, see styles/ember-skin.css), the same way the character creator does.
+ * @returns {boolean}
+ */
+export function emberActive() {
+  return !!game.modules?.get("ember")?.active;
 }
 
 /* -------------------------------------------- */
@@ -394,6 +406,9 @@ export function launchWindowOptions() {
   // Carry the base class explicitly: ApplicationV2 may replace (rather than merge) the static
   // DEFAULT_OPTIONS.classes with the array passed here.
   const classes = ["sogrom-shop", fullscreen() ? "sogrom-shop-fullscreen" : "sogrom-shop-windowed"];
+  // With Ember active the windows wear its skin, so a shop reads as part of Ember's world rather
+  // than a foreign UI dropped on top of it.
+  if ( emberActive() ) classes.push("sogrom-ember");
   if ( fullscreen() ) return { classes };
 
   const w = Math.min(1880, Math.round(window.innerWidth * 0.92));

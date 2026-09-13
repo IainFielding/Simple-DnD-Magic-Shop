@@ -10,10 +10,19 @@
 
   <div class="shop-rail-head">
     <h2>{{localize "sogrom-simple-dnd5e-magic-shop.manager.traders"}}</h2>
-    <button type="button" class="shop-btn shop-btn--primary" data-action="createTrader">
-      <i class="fa-solid fa-plus"></i>
-      {{localize "sogrom-simple-dnd5e-magic-shop.manager.newTrader"}}
-    </button>
+    {{!-- New and Import side by side: both are ways a Trader arrives, and New is the common one,
+          so it takes the width and Import rides alongside as an icon. --}}
+    <div class="shop-rail-actions">
+      <button type="button" class="shop-btn shop-btn--primary" data-action="createTrader">
+        <i class="fa-solid fa-plus"></i>
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.newTrader"}}
+      </button>
+      <button type="button" class="shop-icon-btn" data-action="importTrader"
+              data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.import.tooltip'}}"
+              aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.import.tooltip'}}">
+        <i class="fa-solid fa-file-import"></i>
+      </button>
+    </div>
   </div>
 
   {{#if hasTraders}}
@@ -34,6 +43,11 @@
       </button>
 
       <span class="shop-rail-tools">
+        <button type="button" class="shop-icon-btn" data-action="exportTrader"
+                data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.export.tooltip'}}"
+                aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.export.tooltip'}}">
+          <i class="fa-solid fa-file-export"></i>
+        </button>
         <button type="button" class="shop-icon-btn" data-action="duplicateTrader"
                 data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.duplicate'}}"
                 aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.duplicate'}}">

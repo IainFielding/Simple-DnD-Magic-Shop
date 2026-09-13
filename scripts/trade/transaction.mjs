@@ -5,12 +5,13 @@ import {
 } from "../data/pricing.mjs";
 import { acceptsItem, availableQty, effectiveValueCp, lineVisible } from "../data/stock.mjs";
 import {
-  bookSpend, getAttitude, purse, stockLine, traderData
+  bookSpend, getAttitude, purse, recordTrade, stockLine, traderData
 } from "../data/trader.mjs";
+import { makeEntry } from "../data/ledger.mjs";
 import { serialised } from "../data/serial.mjs";
 import { postReceipt } from "./receipt.mjs";
 import { QUERIES, defineQuery } from "./queries.mjs";
-import { resolveParties } from "./context.mjs";
+import { resolveParties, resolvePayer } from "./context.mjs";
 
 /**
  * Settling a trade. The authoritative path, GM-side, and the only code in the module that moves
@@ -46,11 +47,14 @@ import { resolveParties } from "./context.mjs";
  *
  * @param {object} params
  * @param {object} params.trader
- * @param {object} params.actor
+ * @param {object} params.actor    The character: whose goods are sold, who receives what is
+ *                                 bought, and whose attitude and spend it all counts toward.
+ * @param {object} [params.payer]  Whose coin pays and receives — the character, or a Group they
+ *                                 may spend from (already authorised by `resolvePayer`).
  * @param {object} params.intent   `{mode, buy, sell, goldCp}` from the client.
  * @returns {object}  The plan {@link applyWrites} consumes.
  */
-export function planTrade({ trader, actor, intent }) {
+export function planTrade({ trader, actor, payer = actor, intent }) {
   const mode = intent?.mode === "barter" ? "barter" : "trade";
   const attitude = getAttitude(trader, actor);
   const chaMod = actor.system?.abilities?.cha?.mod ?? 0;
@@ -128,11 +132,13 @@ export function planTrade({ trader, actor, intent }) {
   if ( !buying.length && !selling.length ) throw new Error(t("error.nothingStaged"));
 
   /* --- The money -------------------------------------------------------- */
-  const actorPurseCp = totalCp(actor.system?.currency);
+  // `actorPurseCp` keeps its name for the plan's consumers, but it is the *paying* purse: with a
+  // Group paying, what the character carries is beside the point.
+  const actorPurseCp = totalCp(payer.system?.currency);
   const traderPurseCp = totalCp(purse(trader));
 
   const plan = {
-    mode, trader, actor, buying, selling, multipliers, attitude,
+    mode, trader, actor, payer, buying, selling, multipliers, attitude,
     actorPurseCp, traderPurseCp
   };
 
@@ -152,11 +158,7 @@ function planCash(plan) {
   const creditCp = plan.selling.reduce((sum, l) => sum + (l.unitCp * l.qty), 0);
   const netCp = costCp - creditCp;
 
-  if ( netCp > plan.actorPurseCp ) {
-    throw new Error(t("error.cannotAfford", {
-      short: formatCp(netCp - plan.actorPurseCp)
-    }));
-  }
+  if ( netCp > plan.actorPurseCp ) throw shortError(plan, netCp - plan.actorPurseCp);
   // The Trader's purse is a real constraint: a village blacksmith cannot buy a 5,000 gp blade
   // however much they might like to.
   if ( netCp < 0 && Math.abs(netCp) > plan.traderPurseCp ) {
@@ -181,7 +183,7 @@ function planBarter(plan, intent) {
   const coins = sanitizeCoins(intent?.coins);
   let goldCp;
   if ( coins ) {
-    const held = plan.actor.system?.currency ?? {};
+    const held = plan.payer.system?.currency ?? {};
     for ( const [denomination, count] of Object.entries(coins) ) {
       const have = Math.max(0, Math.floor(Number(held[denomination]) || 0));
       if ( count > have ) {
@@ -191,9 +193,7 @@ function planBarter(plan, intent) {
     goldCp = totalCp(coins);
   } else {
     goldCp = Math.max(0, Math.round(Number(intent?.goldCp) || 0));
-    if ( goldCp > plan.actorPurseCp ) {
-      throw new Error(t("error.cannotAfford", { short: formatCp(goldCp - plan.actorPurseCp) }));
-    }
+    if ( goldCp > plan.actorPurseCp ) throw shortError(plan, goldCp - plan.actorPurseCp);
   }
 
   const balance = barterBalance({
@@ -219,6 +219,21 @@ function planBarter(plan, intent) {
     coins,
     accepted: true
   };
+}
+
+/**
+ * The refusal for a purse that cannot cover a deal — naming the Group when it is the Group's
+ * purse that is short, because "you are 40 gp short" is wrong when your own pockets are full.
+ * @param {object} plan
+ * @param {number} shortCp
+ * @returns {Error}
+ */
+function shortError(plan, shortCp) {
+  const short = formatCp(shortCp);
+  if ( plan.payer && plan.payer.id !== plan.actor.id ) {
+    return new Error(t("error.purseShort", { name: plan.payer.name, short }));
+  }
+  return new Error(t("error.cannotAfford", { short }));
 }
 
 /**
@@ -269,7 +284,7 @@ function wholeQty(raw) {
  * @returns {Promise<object>}  The receipt data.
  */
 export async function applyWrites(plan) {
-  const { trader, actor, buying, selling, mode } = plan;
+  const { trader, actor, payer = actor, buying, selling, mode } = plan;
 
   /* --- 1. Coin ---------------------------------------------------------- */
   await moveCoin(plan);
@@ -319,6 +334,7 @@ export async function applyWrites(plan) {
     mode,
     trader,
     actor,
+    payer,
     // Built from the plan rather than from the created documents: the plan is what knows the
     // prices, and pairing two arrays by index would break the moment one of them was filtered.
     bought: buying.map(receiptLine),
@@ -358,7 +374,11 @@ function receiptLine(line) {
 }
 
 /**
- * Move the coin, in whichever direction the deal runs.
+ * Move the coin, in whichever direction the deal runs, between the Trader and the paying purse.
+ *
+ * The paying purse is the character's own unless a Group is paying, and it works both ways: a
+ * sale made while the party fund is paying puts its proceeds in the party fund, so a character
+ * selling loot for the party cannot quietly pocket it.
  *
  * Deduction goes through dnd5e's own `CurrencyManager`, which handles the part nobody should
  * reimplement: paying an exact amount out of a mixed purse, breaking a platinum piece into gold
@@ -366,7 +386,8 @@ function receiptLine(line) {
  * change to make.
  */
 async function moveCoin(plan) {
-  const { actor, trader, netCp, mode, goldCp, coins } = plan;
+  const { trader, netCp, mode, goldCp, coins } = plan;
+  const actor = plan.payer ?? plan.actor;
   const manager = globalThis.dnd5e?.applications?.CurrencyManager;
 
   // Named coins move as those coins: three platinum offered leave the purse as three platinum
@@ -528,36 +549,62 @@ async function absorbSoldItems(trader, selling) {
  * @param {object} params.intent
  * @returns {Promise<object>}  The receipt data.
  */
-export function settle({ trader, actor, intent }) {
+export function settle({ trader, actor, payer = actor, intent, user = game.user }) {
   // Queued, planning included: a plan made before an earlier settlement has finished writing is
   // a plan made against stale stock and stale purses. See `data/serial.mjs`.
-  return serialised(() => settleNow({ trader, actor, intent }));
+  return serialised(() => settleNow({ trader, actor, payer, intent, user }));
 }
 
 /** The body of {@link settle}. Only ever run from inside the settlement queue. */
-async function settleNow({ trader, actor, intent }) {
-  const plan = planTrade({ trader, actor, intent });
+async function settleNow({ trader, actor, payer, intent, user }) {
+  const plan = planTrade({ trader, actor, payer, intent });
 
   // The veto, fired *after* pricing and *before* any write, on the GM's client. A house-rule
   // module can refuse a trade the players have already confirmed — and because nothing has been
   // written yet, refusing leaves no trace.
-  if ( !fireCancellableHook(HOOKS.preTrade, { trader, actor, intent, priced: plan }) ) {
+  if ( !fireCancellableHook(HOOKS.preTrade, { trader, actor, payer, intent, priced: plan }) ) {
     fireHook(HOOKS.tradeRejected, { trader, actor, intent, reason: "vetoed" });
     throw new Error(t("error.tradeVetoed"));
   }
 
   const receipt = await applyWrites(plan);
   await postReceipt(receipt);
+  await writeLedger(trader, receipt, user);
   fireHook(HOOKS.tradeCompleted, { trader, actor, receipt });
   log(`settled: ${receipt.bought.length} bought, ${receipt.sold.length} sold, `
     + `net ${formatCp(receipt.netCp)}`);
   return receipt;
 }
 
+/**
+ * Record a settled trade in the Trader's ledger.
+ *
+ * Failures are swallowed, for the reason a receipt's are: the goods and the coin have already
+ * moved, and a ledger that could not be written must not turn a successful trade into a refusal
+ * the player then retries.
+ * @param {object} trader
+ * @param {object} receipt
+ * @param {object} [user]  Who pressed the button; recorded by name.
+ */
+async function writeLedger(trader, receipt, user) {
+  try {
+    await recordTrade(trader, makeEntry({
+      id: foundry.utils.randomID(),
+      receipt,
+      worldTime: game.time.worldTime,
+      realTime: Date.now(),
+      userName: user?.name ?? ""
+    }));
+  } catch ( err ) {
+    log("recording a trade in the ledger failed; the trade itself stands", err);
+  }
+}
+
 defineQuery(QUERIES.trade, async (data, { user }) => {
   const { trader, actor } = resolveParties(data, user);
+  const payer = resolvePayer({ actor, payerId: data?.payerId }, user);
   try {
-    const receipt = await settle({ trader, actor, intent: data });
+    const receipt = await settle({ trader, actor, payer, intent: data, user });
     // The document is not serialisable; the client only needs the figures and the new attitude.
     return {
       ok: true,

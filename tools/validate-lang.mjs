@@ -39,7 +39,11 @@ const DYNAMIC_PREFIXES = [
   // rarity.<normalised rarity>, from the generator's bucket labels
   "rarity",
   // manager.trading.restock.<mode>, from the RESTOCK_MODES map
-  "manager.trading.restock"
+  "manager.trading.restock",
+  // archetype.builtIn.<id>.name/.hint, built in data/archetypes.mjs for each built-in archetype
+  "archetype.builtIn",
+  // error.import.<reason>, from parseTraderExport()'s error keys
+  "error.import"
 ];
 
 /** Every file we scan for key references. */

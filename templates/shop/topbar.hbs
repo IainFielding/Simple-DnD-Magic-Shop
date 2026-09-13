@@ -8,10 +8,25 @@
 <header class="shop-topbar shop-topbar--shop">
 
   <div class="shop-party">
-    <img class="shop-party-img" src="{{actor.img}}" alt="">
+    {{!-- Wrapped so a theme can lay a frame over the portrait: an <img> cannot carry a
+          pseudo-element of its own. The Ember skin draws Ember's portrait ring this way. --}}
+    <span class="shop-party-portrait"><img class="shop-party-img" src="{{actor.img}}" alt=""></span>
     <div class="shop-party-main">
       <span class="shop-party-name">{{actor.name}}</span>
-      {{> shopCoin value=actor.purse label=(localize "sogrom-simple-dnd5e-magic-shop.shop.yourPurse")}}
+      {{!-- The purse this deal pays from. Only offered when the character belongs to a Group this
+            player may spend from; otherwise it is simply their own coin and there is nothing to
+            choose. The GM re-checks the choice on every confirmation. --}}
+      {{#if purses.length}}
+      <select class="shop-payer" data-shop-payer
+              aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.payFrom'}}"
+              data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.payFrom'}}"
+              {{#if settling}}disabled{{/if}}>
+        {{#each purses}}
+        <option value="{{id}}" {{#if selected}}selected{{/if}}>{{#if own}}{{localize "sogrom-simple-dnd5e-magic-shop.shop.ownPurse"}}{{else}}{{name}}{{/if}} · {{purse}}</option>
+        {{/each}}
+      </select>
+      {{/if}}
+      {{> shopCoin value=purse.purse label=purseLabel}}
     </div>
   </div>
 
@@ -51,10 +66,17 @@
       <span class="shop-party-name">{{trader.name}}</span>
       {{> shopCoin value=trader.purse label=(localize "sogrom-simple-dnd5e-magic-shop.shop.traderPurse")}}
     </div>
-    <img class="shop-party-img" src="{{trader.img}}" alt="">
+    <span class="shop-party-portrait"><img class="shop-party-img" src="{{trader.img}}" alt=""></span>
   </div>
 
   <div class="shop-topbar-tools">
+    {{!-- This character's past dealings with this Trader, shown in place of the counter. --}}
+    <button type="button" class="shop-icon-btn {{#if showHistory}}is-on{{/if}}" data-action="toggleHistory"
+            aria-pressed="{{#if showHistory}}true{{else}}false{{/if}}"
+            data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.history'}}"
+            aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.history'}}">
+      <i class="fa-solid fa-book-open"></i>
+    </button>
     <button type="button" class="shop-icon-btn" data-action="refresh"
             data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.refresh'}}"
             aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.refresh'}}">

@@ -21,6 +21,8 @@
     price       pre-formatted price string, used in the label rather than on the face
     staged      how many of this line are currently in the stage
     blocked     true when the Trader will not trade this at all; the tile is disabled
+    categories  space-separated category tokens ("equipment equipment:heavy") for the panel's
+                type filter
     blockedWhy  localised reason, shown on hover — a greyed tile with no explanation is a bug
                 report waiting to happen
     exhausted   true when every unit is already on the counter. Dimmed but **not** disabled:
@@ -28,7 +30,7 @@
                 put the item back
 --}}
 <li class="shop-tile{{#if rarity}} rarity-{{rarity}}{{/if}}{{#if staged}} is-staged{{/if}}{{#if blocked}} is-blocked{{/if}}{{#if exhausted}} is-exhausted{{/if}}"
-    data-item-id="{{id}}" data-uuid="{{uuid}}" data-name="{{name}}">
+    data-item-id="{{id}}" data-uuid="{{uuid}}" data-name="{{name}}" data-categories="{{categories}}">
 
   <button type="button" class="shop-tile-button" data-action="stageLine" data-item-id="{{id}}"
           {{#if blocked}}disabled{{/if}}

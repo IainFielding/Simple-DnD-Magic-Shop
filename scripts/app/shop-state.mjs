@@ -1,4 +1,5 @@
 import { barterBalance, formatCp, priceBasket, totalCp } from "../data/pricing.mjs";
+import { categoryTokens } from "../data/generate.mjs";
 
 /**
  * The shop window's working state: what is currently on the counter.
@@ -62,7 +63,7 @@ export class ShopState {
    * @returns {number}  The amount actually staged.
    */
   setCoin(denomination, amount) {
-    const held = this.context?.actor?.currency?.[denomination];
+    const held = this.purse?.currency?.[denomination];
     const ceiling = held === undefined ? Infinity : Math.max(0, Math.floor(Number(held) || 0));
     const value = Math.max(0, Math.min(ceiling, Math.floor(Number(amount) || 0)));
     const next = { ...this.coins };
@@ -75,8 +76,26 @@ export class ShopState {
   /** The last context payload from the GM. */
   context = null;
 
+  /**
+   * The purse this deal pays from: a Group's when the player chose one, otherwise the
+   * character's own. Everything that asks "can they afford it" reads this, not `context.actor`.
+   *
+   * Falls back to the actor for a payload built before purses were part of it — a test fixture,
+   * or a GM client still running an older copy of the module mid-update.
+   * @type {{purseCp: number, currency?: object}|null}
+   */
+  get purse() {
+    return this.context?.purse ?? this.context?.actor ?? null;
+  }
+
   /** Per-panel search needles, applied client-side so typing never triggers a re-render. */
   search = { stock: "", pack: "" };
+
+  /**
+   * Per-panel item type filter: a category token (`"weapon"`, `"equipment:heavy"`) or `""` for
+   * everything. Kept here beside the search so both survive a re-render.
+   */
+  category = { stock: "", pack: "" };
 
   /* -------------------------------------------- */
 
@@ -106,6 +125,15 @@ export class ShopState {
     // Coin too: a character who spent gold elsewhere cannot still be offering it here.
     for ( const [denomination, amount] of Object.entries(this.coins) ) {
       this.setCoin(denomination, amount);
+    }
+    // A type filter for a category the panel no longer holds — the last weapon sold — would
+    // leave the player looking at an empty panel with a dropdown that no longer offers the
+    // choice that emptied it. Fall back to showing everything.
+    for ( const key of ["stock", "pack"] ) {
+      const token = this.category[key];
+      if ( token && !context[key].some(line => categoryTokens(line).includes(token)) ) {
+        this.category[key] = "";
+      }
     }
   }
 
@@ -228,7 +256,7 @@ export class ShopState {
       // The sale is settled in the same breath as the purchase, so its proceeds count toward
       // paying for it — otherwise a player with 10 gp could not trade a 100 gp sword for a
       // 90 gp shield, which is a perfectly ordinary thing to want to do.
-      affordable: netCp <= (this.context?.actor?.purseCp ?? 0),
+      affordable: netCp <= (this.purse?.purseCp ?? 0),
       accepted: true
     };
   }
@@ -256,10 +284,10 @@ export class ShopState {
 
   /** Whether every staged coin is actually in the character's purse. */
   #coinsHeld() {
-    const currency = this.context?.actor?.currency;
+    const currency = this.purse?.currency;
     // No per-denomination purse in the context (an older payload, or a test fixture): fall back
     // to comparing totals, which is still never wrong in the unsafe direction.
-    if ( !currency ) return this.goldCp <= (this.context?.actor?.purseCp ?? 0);
+    if ( !currency ) return this.goldCp <= (this.purse?.purseCp ?? 0);
     return Object.entries(this.coins).every(([d, n]) => n <= (Number(currency[d]) || 0));
   }
 }

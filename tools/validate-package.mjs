@@ -133,11 +133,22 @@ for ( const file of walk(join(root, "scripts"), ".mjs") ) {
 
 /* --- Files the stylesheets pull in ----------------------------------------------- */
 
+/** Files in other modules' folders, listed so they are visible rather than silently skipped. */
+const external = new Set();
+
 for ( const file of walk(join(root, "styles"), ".css") ) {
   const source = readFileSync(file, "utf8");
   for ( const [, raw] of source.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g) ) {
     if ( /^(data:|https?:|#)/.test(raw) ) continue;
-    requireFile(rel(resolve(dirname(file), raw)), rel(file));
+    const path = rel(resolve(dirname(file), raw));
+    // A path that climbs out of the module lands in *another* module's folder — the Ember skin
+    // borrowing Ember's art, which we must never copy into our archive. It cannot be checked
+    // from here; the end-to-end harness fetches those files on a machine that has the module.
+    if ( path.startsWith("../") ) {
+      external.add(`${path.slice(3)} (${rel(file)})`);
+      continue;
+    }
+    requireFile(path, rel(file));
   }
 }
 
@@ -149,3 +160,7 @@ if ( problems.length ) {
   process.exit(1);
 }
 console.log(`Package ok: ${relative(process.cwd(), root) || "."}${release ? " (release values checked)" : ""}`);
+if ( external.size ) {
+  console.log(`  ${external.size} file(s) from other modules, not checked here:`);
+  for ( const path of external ) console.log(`    ${path}`);
+}

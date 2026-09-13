@@ -4,21 +4,29 @@ import {
 import { attitudeTier } from "../data/attitude.mjs";
 import { RESTOCK_MODES, daysUntilRestock } from "../data/restock.mjs";
 import {
-  BUDGET_KEYS, budgetTotal, categoryCounts, defaultBudget, filterPool, pickByBudget,
+  BUDGET_KEYS, budgetTotal, categoryCounts, defaultBudget, filterPool,
   rollTableStock, sanitizeBudget
 } from "../data/generate.mjs";
 import { itemPool, poolCounts, poolSources } from "../data/item-index.mjs";
 import { formatCp, priceMultipliers, pricesFor, totalCp } from "../data/pricing.mjs";
 import {
-  createTrader, deleteTrader, duplicateTrader, getTrader, listTraders, pruneRegistry
+  createTrader, deleteTrader, duplicateTrader, getTrader, importTrader, listTraders, pruneRegistry
 } from "../data/registry.mjs";
 import {
   FILTER_RARITIES, MUNDANE, cpToPriceParts, effectiveValueCp, parsePriceInput
 } from "../data/stock.mjs";
 import {
-  addStockItems, gainSettings, getAttitude, purse, restockTrader, setAttitude, spendFor,
-  stockEntries, stockLine, traderData
+  addStockItems, applyArchetype, clearLedger, gainSettings, getAttitude, ledgerOf, purse,
+  restockTrader, setAttitude, spendFor, stockEntries, stockFromRecipe, stockLine, traderData
 } from "../data/trader.mjs";
+import {
+  BUILT_IN_ARCHETYPES, archetypeFromTrader, budgetSummary, deleteArchetype, listArchetypes,
+  recipeToGenerator, saveArchetype
+} from "../data/archetypes.mjs";
+import { LEDGER_LIMIT, ledgerCharacters, ledgerTotals } from "../data/ledger.mjs";
+import { exportFileName, exportTrader } from "../data/portable.mjs";
+import { historyView } from "../trade/context.mjs";
+import { categoryLabel, categoryTree } from "./categories.mjs";
 import { ShopShellBase } from "./shell-base.mjs";
 import { yieldTakeoverTo } from "./takeover.mjs";
 import { ShopApp } from "./shop-app.mjs";
@@ -43,12 +51,13 @@ import { postTraderCard } from "./chat-card.mjs";
  * per keystroke), drops create the item immediately, and removal deletes it. That is also what
  * makes two GMs with the manager open merely awkward rather than destructive.
  *
- * ## The four panes
+ * ## The five panes
  *
- * Identity is who the Trader is; Stock is what it sells; Trading is how it bargains and when it
- * restocks; Attitudes is what it thinks of each character. Only the selected pane's context is
- * built, because the Stock pane's price previews and the Attitudes pane's table are both
- * per-row work nobody is looking at from the other tabs.
+ * Identity is who the Trader is (and the archetype it can start from); Stock is what it sells;
+ * Trading is how it bargains and when it restocks; Attitudes is what it thinks of each character;
+ * Ledger is every deal it has struck. Only the selected pane's context is built, because the Stock
+ * pane's price previews, the Attitudes table and the Ledger are all per-row work nobody is looking
+ * at from the other tabs.
  */
 export class TraderManagerApp extends ShopShellBase {
 
@@ -77,7 +86,14 @@ export class TraderManagerApp extends ShopShellBase {
       openShopAsGM: TraderManagerApp.#onOpenShopAsGM,
       restockNow: TraderManagerApp.#onRestockNow,
       resetAttitude: TraderManagerApp.#onResetAttitude,
-      clearCategories: TraderManagerApp.#onClearCategories
+      clearCategories: TraderManagerApp.#onClearCategories,
+      applyArchetype: TraderManagerApp.#onApplyArchetype,
+      applyArchetypeStock: TraderManagerApp.#onApplyArchetypeStock,
+      saveArchetype: TraderManagerApp.#onSaveArchetype,
+      deleteArchetype: TraderManagerApp.#onDeleteArchetype,
+      exportTrader: TraderManagerApp.#onExportTrader,
+      importTrader: TraderManagerApp.#onImportTrader,
+      clearLedger: TraderManagerApp.#onClearLedger
     }
   };
 
@@ -98,7 +114,8 @@ export class TraderManagerApp extends ShopShellBase {
     { id: "identity", icon: "fa-solid fa-user-tie", ready: true },
     { id: "stock", icon: "fa-solid fa-boxes-stacked", ready: true },
     { id: "trading", icon: "fa-solid fa-scale-balanced", ready: true },
-    { id: "attitudes", icon: "fa-solid fa-face-smile", ready: true }
+    { id: "attitudes", icon: "fa-solid fa-face-smile", ready: true },
+    { id: "ledger", icon: "fa-solid fa-book", ready: true }
   ];
 
   /** Id of the Trader on screen, or null for the empty state. */
@@ -127,23 +144,11 @@ export class TraderManagerApp extends ShopShellBase {
     draws: 5
   };
 
-  /**
-   * Which of the system's config maps holds the subtypes for each item type.
-   *
-   * The two levels matter: dnd5e has six physical item *types*, and neither "armour" nor
-   * "musical instrument" is among them — armour is `equipment` with a subtype, a lute is a
-   * `tool` with a subtype of `music`. Without the second level a GM cannot ask for either.
-   *
-   * `container` is absent deliberately: its subtypes are backpack/chest sorts of thing, which
-   * nobody generates a shop by.
-   */
-  static SUBTYPE_SOURCES = {
-    weapon: "weaponTypes",
-    equipment: "equipmentTypes",
-    consumable: "consumableTypes",
-    tool: "toolTypes",
-    loot: "lootTypes"
-  };
+  /** The archetype chosen in the Identity pane's picker. Window state, never persisted. */
+  #archetypeId = BUILT_IN_ARCHETYPES[0].id;
+
+  /** The Ledger pane's character filter: an actor id, or "" for everyone. */
+  #ledgerActor = "";
 
   /* -------------------------------------------- */
   /*  Launching                                   */
@@ -263,6 +268,10 @@ export class TraderManagerApp extends ShopShellBase {
   async #paneContext(actor) {
     const data = traderData(actor);
     switch ( this.#tab ) {
+      case "identity":
+        return { archetypes: this.#archetypeContext() };
+      case "ledger":
+        return { ledger: this.#ledgerContext(actor) };
       case "stock":
         return {
           ...this.#stockContext(actor),
@@ -364,12 +373,109 @@ export class TraderManagerApp extends ShopShellBase {
   }
 
   /**
+   * The Identity pane's archetype picker: every archetype as an option, and the chosen one spelled
+   * out — what it stocks, what it buys, how it restocks — so a GM can read what Apply will do
+   * before pressing it.
+   */
+  #archetypeContext() {
+    const all = listArchetypes();
+    const chosen = all.find(a => a.id === this.#archetypeId) ?? all[0];
+    this.#archetypeId = chosen.id;
+
+    const option = a => ({ id: a.id, name: archetypeName(a), selected: a.id === chosen.id });
+    const f = chosen.buyFilter;
+    const buys = f.allowAll
+      ? t("manager.archetype.buysAnything")
+      : [
+        ...f.types.map(type => game.i18n.localize(CONFIG.Item.typeLabels?.[type] ?? type)),
+        ...f.rarities.map(key => t(`rarity.${key === MUNDANE ? "mundane" : key}`))
+      ].join(", ") || t("manager.archetype.buysAnything");
+
+    return {
+      builtIn: all.filter(a => a.builtIn).map(option),
+      saved: all.filter(a => !a.builtIn).map(option),
+      hasSaved: all.some(a => !a.builtIn),
+      chosen: {
+        id: chosen.id,
+        name: archetypeName(chosen),
+        hint: chosen.builtIn ? game.i18n.localize(chosen.hint) : "",
+        icon: chosen.icon,
+        builtIn: chosen.builtIn,
+        stocks: budgetSummary(chosen.recipe)
+          .map(([key, n]) => `${n} ${key ? t(`rarity.${key}`) : t("rarity.mundane")}`)
+          .join(", "),
+        kinds: chosen.recipe.categories.map(categoryLabel).join(", ")
+          || t("manager.archetype.anyKind"),
+        ceiling: chosen.recipe.maxValueCp > 0 ? formatCp(chosen.recipe.maxValueCp) : "",
+        buys,
+        restock: chosen.restock.mode === "time"
+          ? t("manager.archetype.restockEvery", { days: chosen.restock.days })
+          : t(`manager.trading.restock.${chosen.restock.mode}`),
+        attitude: chosen.startingAttitude === null
+          ? t("manager.archetype.attitudeUnchanged")
+          : String(chosen.startingAttitude)
+      }
+    };
+  }
+
+  /**
+   * The Ledger pane: every deal this Trader has struck, newest first, optionally narrowed to one
+   * character, with what it all came to.
+   */
+  #ledgerContext(actor) {
+    const all = ledgerOf(actor);
+    const characters = ledgerCharacters(all);
+    // A filter for a character whose rows were all cleared would show an empty table under a
+    // filter that no longer offers itself; drop it.
+    if ( this.#ledgerActor && !characters.some(c => c.id === this.#ledgerActor) ) this.#ledgerActor = "";
+    const entries = this.#ledgerActor ? all.filter(e => e.actorId === this.#ledgerActor) : all;
+    const totals = ledgerTotals(entries);
+
+    return {
+      rows: entries.map(entry => ({
+        ...historyView(entry),
+        actorName: entry.actorName,
+        userName: entry.userName
+      })),
+      hasRows: entries.length > 0,
+      hasAny: all.length > 0,
+      filter: [
+        { id: "", name: t("manager.ledger.everyone"), selected: !this.#ledgerActor },
+        ...characters.map(c => ({ ...c, selected: c.id === this.#ledgerActor }))
+      ],
+      totals: {
+        trades: totals.trades,
+        taken: formatCp(totals.takenCp),
+        paid: formatCp(totals.paidCp),
+        itemsSold: totals.itemsSold,
+        itemsBought: totals.itemsBought
+      },
+      limit: LEDGER_LIMIT
+    };
+  }
+
+  /**
+   * The generator panel's state as a stock recipe — what Generate runs, and what "Save as
+   * archetype" records.
+   * @returns {import("../data/archetypes.mjs").Recipe}
+   */
+  #recipe() {
+    const state = this.#generator;
+    return {
+      budget: state.budget,
+      categories: state.categories,
+      packs: state.packs,
+      maxValueCp: parsePriceInput(state.maxValue, state.maxDenom) ?? 0
+    };
+  }
+
+  /**
    * The kinds of item the generator may draw from, as a two-level tree with counts.
    *
    * Built from the system's own config maps rather than a list of our own, so it picks up
-   * whatever a content module adds and is localised by dnd5e. Those maps come in two shapes —
-   * `weaponTypes` is `key -> "label"` while `lootTypes` is `key -> {label}` — hence the
-   * normalisation below.
+   * whatever a content module adds and is localised by dnd5e. The tree itself lives in
+   * `app/categories.mjs`, shared with the shop's item type filter, so the categories a GM builds
+   * a shop from are the ones a player filters its shelves by.
    *
    * A type with nothing in the pool is dropped entirely, and a subtype with nothing is dropped
    * from its group: a list of forty tickable things that would generate nothing is worse than a
@@ -378,36 +484,7 @@ export class TraderManagerApp extends ShopShellBase {
    * @returns {object[]}
    */
   #categoryTree(pool) {
-    const counts = categoryCounts(pool);
-    const chosen = new Set(this.#generator.categories);
-    const label = entry => typeof entry === "string" ? entry : (entry?.label ?? "");
-
-    const groups = [];
-    for ( const type of PHYSICAL_TYPES ) {
-      const total = counts[type] ?? 0;
-      if ( !total ) continue;
-
-      const source = CONFIG.DND5E?.[this.constructor.SUBTYPE_SOURCES[type]] ?? {};
-      const subtypes = Object.entries(source)
-        .map(([key, entry]) => ({
-          value: `${type}:${key}`,
-          label: game.i18n.localize(label(entry)),
-          count: counts[`${type}:${key}`] ?? 0,
-          checked: chosen.has(`${type}:${key}`)
-        }))
-        .filter(sub => sub.count > 0)
-        .sort((a, b) => a.label.localeCompare(b.label, game.i18n.lang));
-
-      groups.push({
-        value: type,
-        label: game.i18n.localize(CONFIG.Item.typeLabels?.[type] ?? type),
-        count: total,
-        checked: chosen.has(type),
-        subtypes,
-        hasSubtypes: subtypes.length > 0
-      });
-    }
-    return groups;
+    return categoryTree(categoryCounts(pool), new Set(this.#generator.categories));
   }
 
   /**
@@ -558,30 +635,31 @@ export class TraderManagerApp extends ShopShellBase {
     const trader = getTrader(this.#selected);
     if ( !trader ) return;
 
-    const state = this.#generator;
-    if ( budgetTotal(state.budget) <= 0 ) {
+    if ( budgetTotal(this.#generator.budget) <= 0 ) {
       return void ui.notifications.warn(t("manager.generate.emptyBudget"));
     }
+    // Through the same path an archetype's "apply with stock" and the API use, so the three can
+    // never disagree about what a recipe produces.
+    await this.#runRecipe(trader, this.#recipe());
+  }
 
-    const pool = filterPool(await itemPool(), {
-      packs: state.packs,
-      categories: state.categories,
-      maxValueCp: parsePriceInput(state.maxValue, state.maxDenom) ?? 0
-    });
-    const { picked, shortfalls } = pickByBudget({ pool, budget: state.budget });
-
-    // Say what could not be found rather than quietly handing back fewer: a GM whose packs hold
-    // two legendary items should be told that, not left to conclude the generator is broken.
-    const gaps = Object.entries(shortfalls);
+  /**
+   * Fill a Trader's shelves from a recipe and report what happened.
+   *
+   * Says what could not be found rather than quietly handing back fewer: a GM whose packs hold
+   * two legendary items should be told that, not left to conclude the generator is broken.
+   */
+  async #runRecipe(trader, recipe) {
+    const result = await stockFromRecipe(trader, recipe);
+    const gaps = Object.entries(result.shortfalls);
     if ( gaps.length ) {
       ui.notifications.warn(t("manager.generate.shortfall", {
         detail: gaps.map(([key, n]) => `${n} ${key ? t(`rarity.${key}`) : t("rarity.mundane")}`)
           .join(", ")
       }));
     }
-    if ( !picked.length ) return;
-
-    await this.#addUuids(trader, picked.map(entry => entry.uuid));
+    if ( !result.picked ) return;
+    this.#reportAdded(result);
   }
 
   /** Draw stock from a RollTable. */
@@ -603,7 +681,11 @@ export class TraderManagerApp extends ShopShellBase {
    * screen in notifications.
    */
   async #addUuids(trader, uuids) {
-    const { created, raised, failed, rejected } = await addStockItems(trader, uuids);
+    this.#reportAdded(await addStockItems(trader, uuids));
+  }
+
+  /** One report for a batch of added stock, then show the Stock tab it landed in. */
+  #reportAdded({ created, raised, failed, rejected }) {
     ui.notifications.info(t("manager.generate.added", {
       created: created.length, raised: raised.length
     }));
@@ -795,6 +877,17 @@ export class TraderManagerApp extends ShopShellBase {
     // scratch state, and they must not write a document. Checked first, because the generator
     // panel sits inside the Stock pane and would otherwise fall through to the Trader branch.
     if ( field.startsWith("gen.") ) return this.#commitGeneratorField(field.slice(4), input);
+
+    // Pickers that only change what this window shows: the archetype being read and the ledger's
+    // character filter. Neither is a property of the Trader, so neither writes anything.
+    if ( field === "view.archetype" ) {
+      this.#archetypeId = input.value;
+      return void this.render({ parts: ["pane"] });
+    }
+    if ( field === "view.ledgerActor" ) {
+      this.#ledgerActor = input.value;
+      return void this.render({ parts: ["pane"] });
+    }
 
     const itemId = input.closest("[data-item-id]")?.dataset.itemId;
     if ( itemId ) return this.#commitStockField(trader, itemId, field, input);
@@ -1162,6 +1255,170 @@ export class TraderManagerApp extends ShopShellBase {
     this.render({ parts: ["pane"] });
   }
 
+  /* -------------------------------------------- */
+  /*  Archetypes                                  */
+  /* -------------------------------------------- */
+
+  /** The archetype chosen in the picker, if it still exists. */
+  #chosenArchetype() {
+    return listArchetypes().find(a => a.id === this.#archetypeId) ?? null;
+  }
+
+  /**
+   * Give the selected Trader the chosen archetype's character, and prime the generator with its
+   * recipe so the Stock tab is one click from running it.
+   */
+  static async #onApplyArchetype() {
+    const trader = getTrader(this.#selected);
+    const archetype = this.#chosenArchetype();
+    if ( !trader || !archetype ) return;
+    await applyArchetype(trader, archetype);
+    Object.assign(this.#generator, recipeToGenerator(archetype.recipe, cpToPriceParts));
+    ui.notifications.info(t("manager.archetype.applied", {
+      archetype: archetypeName(archetype), name: trader.name
+    }));
+    this.render({ parts: ["rail", "pane"] });
+  }
+
+  /** Apply the archetype, then fill the shelves from its recipe and show them. */
+  static async #onApplyArchetypeStock() {
+    const trader = getTrader(this.#selected);
+    const archetype = this.#chosenArchetype();
+    if ( !trader || !archetype ) return;
+    await applyArchetype(trader, archetype);
+    Object.assign(this.#generator, recipeToGenerator(archetype.recipe, cpToPriceParts));
+    this.#generator.open = true;
+    await this.#runRecipe(trader, archetype.recipe);
+    this.#tab = "stock";
+    this.render({ parts: ["rail", "pane"] });
+  }
+
+  /**
+   * Save the selected Trader as an archetype: its buy filter, restock rule and starting attitude,
+   * with the generator panel's current recipe as the stock recipe.
+   */
+  static async #onSaveArchetype() {
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+
+    const name = await foundry.applications.api.DialogV2.prompt({
+      window: { title: t("manager.archetype.saveTitle"), icon: "fa-solid fa-floppy-disk" },
+      content: `<p>${t("manager.archetype.saveBody")}</p>
+        <label class="shop-field"><span>${t("manager.archetype.nameLabel")}</span>
+        <input type="text" name="archetypeName" value="${foundry.utils.escapeHTML(trader.name)}"
+               autocomplete="off" autofocus required></label>`,
+      ok: {
+        label: t("manager.archetype.save"),
+        callback: (_event, button) => button.form.elements.archetypeName.value.trim()
+      },
+      rejectClose: false
+    });
+    if ( !name ) return;
+
+    try {
+      const saved = await saveArchetype(archetypeFromTrader({
+        id: foundry.utils.randomID(),
+        name,
+        data: traderData(trader),
+        recipe: this.#recipe()
+      }));
+      this.#archetypeId = saved.id;
+      ui.notifications.info(t("manager.archetype.savedNotice", { name: saved.name }));
+    } catch ( err ) {
+      ui.notifications.warn(err.message);
+    }
+    this.render({ parts: ["pane"] });
+  }
+
+  /** Delete the chosen saved archetype. Built-ins offer no delete button, and refuse anyway. */
+  static async #onDeleteArchetype() {
+    const archetype = this.#chosenArchetype();
+    if ( !archetype || archetype.builtIn ) return;
+
+    const proceed = await foundry.applications.api.DialogV2.confirm({
+      window: { title: t("manager.archetype.deleteTitle"), icon: "fa-solid fa-trash-can" },
+      content: `<p>${t("manager.archetype.deleteBody", { name: foundry.utils.escapeHTML(archetype.name) })}</p>`,
+      rejectClose: false
+    });
+    if ( !proceed ) return;
+
+    await deleteArchetype(archetype.id);
+    this.#archetypeId = BUILT_IN_ARCHETYPES[0].id;
+    this.render({ parts: ["pane"] });
+  }
+
+  /* -------------------------------------------- */
+  /*  Export and import                           */
+  /* -------------------------------------------- */
+
+  /**
+   * Download a Trader as a file another world can import. Stock travels whole; what the Trader
+   * thinks of this world's characters, and its ledger, do not — see data/portable.mjs.
+   */
+  static #onExportTrader(_event, target) {
+    const id = target.closest("[data-trader-id]")?.dataset.traderId ?? this.#selected;
+    const trader = getTrader(id);
+    if ( !trader ) return;
+    const file = exportTrader(trader.toObject(), {
+      moduleVersion: game.modules.get(MODULE_ID)?.version ?? "",
+      exportedAt: new Date().toISOString()
+    });
+    foundry.utils.saveDataToFile(JSON.stringify(file, null, 2), "application/json",
+      exportFileName(trader.name));
+    ui.notifications.info(t("manager.export.done", { name: trader.name, count: file.items.length }));
+  }
+
+  /** Create a Trader from an export file the GM picks. */
+  static async #onImportTrader() {
+    const file = await foundry.applications.api.DialogV2.prompt({
+      window: { title: t("manager.import.title"), icon: "fa-solid fa-file-import" },
+      content: `<p>${t("manager.import.body")}</p>
+        <input type="file" name="traderFile" accept=".json,application/json" required>`,
+      ok: {
+        label: t("manager.import.button"),
+        callback: (_event, button) => button.form.elements.traderFile.files?.[0] ?? null
+      },
+      rejectClose: false
+    });
+    if ( !file ) return;
+
+    let text;
+    try {
+      text = await foundry.utils.readTextFromFile(file);
+    } catch {
+      return void ui.notifications.warn(t("error.import.unreadable"));
+    }
+
+    const { actor, error, items } = await importTrader(text);
+    if ( error ) return void ui.notifications.warn(t(`error.import.${error}`));
+
+    this.#selected = actor.id;
+    this.#tab = "identity";
+    ui.notifications.info(t("manager.import.done", { name: actor.name, count: items }));
+    this.render();
+  }
+
+  /* -------------------------------------------- */
+  /*  Ledger                                      */
+  /* -------------------------------------------- */
+
+  /** Empty the selected Trader's ledger, after asking. Receipts already in chat are untouched. */
+  static async #onClearLedger() {
+    const trader = getTrader(this.#selected);
+    if ( !trader || !ledgerOf(trader).length ) return;
+
+    const proceed = await foundry.applications.api.DialogV2.confirm({
+      window: { title: t("manager.ledger.clearTitle"), icon: "fa-solid fa-trash-can" },
+      content: `<p>${t("manager.ledger.clearBody", { name: foundry.utils.escapeHTML(trader.name) })}</p>`,
+      rejectClose: false
+    });
+    if ( !proceed ) return;
+
+    await clearLedger(trader);
+    this.#ledgerActor = "";
+    this.render({ parts: ["pane"] });
+  }
+
   /**
    * Heal the registry on the way out.
    *
@@ -1189,6 +1446,16 @@ export class TraderManagerApp extends ShopShellBase {
   static attitudeOf(trader, character) {
     return getAttitude(trader, character);
   }
+}
+
+/* -------------------------------------------- */
+/**
+ * An archetype's display name: a built-in's is a localisation key, a saved one's is the GM's own.
+ * @param {import("../data/archetypes.mjs").Archetype} archetype
+ * @returns {string}
+ */
+function archetypeName(archetype) {
+  return archetype.builtIn ? game.i18n.localize(archetype.name) : archetype.name;
 }
 
 /* -------------------------------------------- */

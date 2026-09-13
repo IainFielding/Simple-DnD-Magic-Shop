@@ -1,10 +1,18 @@
 import { HOOKS, fireCancellableHook, log, normalizeRarity, t } from "../config.mjs";
 import { attitudeTier } from "../data/attitude.mjs";
+import { entriesFor } from "../data/ledger.mjs";
+import { canPayFrom, payableGroups } from "../data/party.mjs";
 import { formatCp, resolveMultipliers, totalCp } from "../data/pricing.mjs";
 import { getTrader } from "../data/registry.mjs";
 import { acceptsItem, availableQty, effectiveValueCp, lineVisible } from "../data/stock.mjs";
-import { getAttitude, purse, stockEntries, traderData } from "../data/trader.mjs";
+import { getAttitude, ledgerOf, purse, stockEntries, traderData } from "../data/trader.mjs";
 import { QUERIES, defineQuery } from "./queries.mjs";
+
+/**
+ * How many of a character's past dealings their shop is sent. The shop shows a short history,
+ * not an archive; the full ledger is the GM's, in the Trader Manager.
+ */
+export const HISTORY_LIMIT = 20;
 
 /**
  * Building the payload a player's shop renders from — on the GM's client, always.
@@ -55,6 +63,34 @@ export function resolveParties({ traderId, actorId }, user) {
   return { trader, actor };
 }
 
+/**
+ * Resolve and authorise the purse a trade pays from.
+ *
+ * No `payerId`, or the character's own id, means the character's own purse — the default, and the
+ * only choice when they belong to no Group. Anything else must be a Group the character is a
+ * member of **and** the requesting user owns (see `data/party.mjs`); the check runs against the
+ * framework-supplied user, so naming somebody else's Group in the payload gets a refusal, not
+ * their gold.
+ *
+ * Called after {@link resolveParties}, which has already established the user may act as the
+ * character at all.
+ * @param {object} params
+ * @param {object} params.actor      The character, already authorised.
+ * @param {string} [params.payerId]  A Group's id or uuid.
+ * @param {object} user
+ * @returns {object}  The actor whose currency pays and receives.
+ * @throws {Error}  With a player-readable message.
+ */
+export function resolvePayer({ actor, payerId }, user) {
+  if ( !payerId || payerId === actor.id || payerId === actor.uuid ) return actor;
+  const group = resolveActor(payerId);
+  if ( !canPayFrom({ group, actor, user }) ) {
+    log(`${user?.name} tried to pay for "${actor.name}" from "${group?.name ?? payerId}", which is not allowed`);
+    throw new Error(t("error.notYourPurse"));
+  }
+  return group;
+}
+
 /** An actor from an id or a uuid, matching what the chat card and the API each carry. */
 function resolveActor(idOrUuid) {
   if ( !idOrUuid ) return null;
@@ -73,9 +109,14 @@ function resolveActor(idOrUuid) {
  *
  * @param {object} trader
  * @param {object} actor
+ * @param {object} [options]
+ * @param {object} [options.payer]  The purse paying, from {@link resolvePayer}; the character's own
+ *                                  by default.
+ * @param {object} [options.user]   Whose Groups to offer. The requesting user on the GM's side; the
+ *                                  API passes the calling GM.
  * @returns {object}  JSON-serialisable; it crosses a socket.
  */
-export function buildShopContext(trader, actor) {
+export function buildShopContext(trader, actor, { payer = actor, user = game.user } = {}) {
   const data = traderData(trader);
   const attitude = getAttitude(trader, actor);
   const chaMod = actor.system?.abilities?.cha?.mod ?? 0;
@@ -103,11 +144,21 @@ export function buildShopContext(trader, actor) {
       chaMod,
       purseCp: totalCp(actor.system?.currency),
       purse: formatCp(totalCp(actor.system?.currency)),
-      // Coin by denomination, so the barter boxes can each cap at what the character holds of
-      // that coin. The character's own purse, which their client could read anyway.
-      currency: Object.fromEntries(Object.keys(CONFIG.DND5E?.currencies ?? {})
-        .map(d => [d, Math.max(0, Math.floor(Number(actor.system?.currency?.[d]) || 0))]))
+      // Coin by denomination. The character's own purse, which their client could read anyway;
+      // the barter boxes cap against `purse.currency`, which is this unless a Group is paying.
+      currency: coinsOf(actor)
     },
+    // The purse this deal pays from and pays into. Everything that asks "can they afford it" reads
+    // this rather than `actor`, because with a Group paying the character's own coin is beside
+    // the point.
+    purse: purseView(payer, actor),
+    // Every purse the player could choose. Empty when the character has no Group to draw on, which
+    // is what hides the choice in the shop altogether.
+    purses: purseChoices(actor, payer, user),
+    // This character's own dealings with this Trader, newest first. Filtered here, on the GM's
+    // client, so the payload carries nobody else's trades — see data/ledger.mjs on what that is
+    // and is not worth.
+    history: entriesFor(ledgerOf(trader), actor.id, HISTORY_LIMIT).map(historyView),
     attitude: attitudeTier(attitude),
     multipliers: {
       buy: multipliers.buy,
@@ -120,6 +171,91 @@ export function buildShopContext(trader, actor) {
     stock: visibleStock(trader, attitude, multipliers),
     pack: sellableInventory(trader, actor, multipliers)
   };
+}
+
+/**
+ * One purse, as the shop shows it and as the staging maths reads it.
+ * @param {object} payer
+ * @param {object} actor
+ * @returns {object}
+ */
+function purseView(payer, actor) {
+  const cp = totalCp(payer.system?.currency);
+  return {
+    id: payer.id,
+    name: payer.name,
+    img: payer.img,
+    own: payer.id === actor.id,
+    purseCp: cp,
+    purse: formatCp(cp),
+    currency: coinsOf(payer)
+  };
+}
+
+/**
+ * The purses a character may pay from: their own, then each Group this user may spend from.
+ * Empty when there is nothing to choose between.
+ * @returns {{id: string, name: string, own: boolean, selected: boolean, purse: string}[]}
+ */
+function purseChoices(actor, payer, user) {
+  const groups = payableGroups(game.actors, actor, user);
+  if ( !groups.length ) return [];
+  return [actor, ...groups].map(owner => ({
+    id: owner.id,
+    name: owner.name,
+    own: owner.id === actor.id,
+    selected: owner.id === payer.id,
+    purse: formatCp(totalCp(owner.system?.currency))
+  }));
+}
+
+/** Coin by denomination, whole and non-negative, for every denomination the system defines. */
+function coinsOf(owner) {
+  return Object.fromEntries(Object.keys(CONFIG.DND5E?.currencies ?? {})
+    .map(d => [d, Math.max(0, Math.floor(Number(owner.system?.currency?.[d]) || 0))]));
+}
+
+/**
+ * A ledger entry as a player's shop shows it.
+ *
+ * The in-game date is formatted here, on the GM's client, because it is the GM's calendar — a
+ * world with a custom calendar module has it configured where the settling happens, and a
+ * player's client may not render it identically.
+ * @param {import("../data/ledger.mjs").LedgerEntry} entry
+ * @returns {object}
+ */
+export function historyView(entry) {
+  const net = entry.netCp;
+  return {
+    id: entry.id,
+    when: formatWorldTime(entry.worldTime),
+    barter: entry.mode === "barter",
+    bought: entry.bought.map(line => ({ ...line, line: formatCp(line.lineCp) })),
+    sold: entry.sold.map(line => ({ ...line, line: formatCp(line.lineCp) })),
+    paid: net > 0 ? formatCp(net) : "",
+    received: net < 0 ? formatCp(-net) : "",
+    payerName: entry.payerName,
+    attitudeGained: entry.attitudeGained
+  };
+}
+
+/**
+ * A world time as the world's own calendar writes it, falling back to a day count.
+ *
+ * Foundry v14 formats through `game.time.calendar.format`, which throws on a formatter a calendar
+ * module has not registered. A ledger that failed to render because of the calendar would be a
+ * poor trade for a prettier date, so any failure reads as "Day N".
+ * @param {number} worldTime
+ * @returns {string}
+ */
+export function formatWorldTime(worldTime) {
+  try {
+    const formatted = game.time?.calendar?.format?.(worldTime);
+    if ( typeof formatted === "string" && formatted ) return formatted;
+  } catch ( err ) {
+    log("calendar could not format a ledger date; using a day count", err);
+  }
+  return t("ledger.day", { day: Math.floor((Number(worldTime) || 0) / 86_400) + 1 });
 }
 
 /**
@@ -147,6 +283,7 @@ function visibleStock(trader, attitude, multipliers) {
       name: item.name,
       img: item.img,
       type: item.type,
+      subtype: subtypeOf(item),
       rarity: normalizeRarity(item.system?.rarity),
       // `Infinity` does not survive JSON, so an unlimited line says so with a flag and a
       // quantity the UI never shows.
@@ -196,6 +333,7 @@ function sellableInventory(trader, actor, multipliers) {
       name: item.name,
       img: item.img,
       type: item.type,
+      subtype: subtypeOf(item),
       rarity: normalizeRarity(item.system?.rarity),
       qty,
       valueCp,
@@ -209,12 +347,24 @@ function sellableInventory(trader, actor, multipliers) {
   return out.sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang));
 }
 
+/**
+ * An item's dnd5e subtype — "heavy" armour, a "music" tool, a "gem" — read the same way the
+ * stock generator's item index reads it, so the shop's type filter and the generator's kinds
+ * picker sort items into the same categories.
+ * @returns {string}
+ */
+function subtypeOf(item) {
+  const value = item.system?.type?.value;
+  return typeof value === "string" ? value : "";
+}
+
 /* -------------------------------------------- */
 /*  The query                                   */
 /* -------------------------------------------- */
 
 defineQuery(QUERIES.context, async (data, { user }) => {
   const { trader, actor } = resolveParties(data, user);
+  const payer = resolvePayer({ actor, payerId: data?.payerId }, user);
 
   // A shop opening is worth a hook: a module might want to refuse one (a curfew, a faction
   // grudge, a quest state). Fired on the GM's client, where a veto can actually be trusted.
@@ -223,5 +373,5 @@ defineQuery(QUERIES.context, async (data, { user }) => {
   }
 
   log(`shop context for "${actor.name}" at "${trader.name}"`);
-  return buildShopContext(trader, actor);
+  return buildShopContext(trader, actor, { payer, user });
 });

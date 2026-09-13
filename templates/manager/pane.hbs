@@ -30,6 +30,80 @@
   {{!-- ---------------------------------------------- Identity --}}
   <div class="shop-form" role="tabpanel">
 
+    {{!--
+      Archetypes: a whole kind of shop in one choice. The chosen one is spelled out before any
+      button is pressed, because Apply rewrites the buy filter and restock rule and a GM should
+      be able to read what they are about to get.
+    --}}
+    <fieldset class="shop-fieldset shop-archetype">
+      <legend>{{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.legend"}}</legend>
+
+      <div class="shop-generator-row">
+        <label class="shop-field shop-field--inline">
+          <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.pick"}}</span>
+          <select data-shop-field="view.archetype">
+            <optgroup label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.archetype.builtIn'}}">
+              {{#each archetypes.builtIn}}
+              <option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>
+              {{/each}}
+            </optgroup>
+            {{#if archetypes.hasSaved}}
+            <optgroup label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.archetype.saved'}}">
+              {{#each archetypes.saved}}
+              <option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>
+              {{/each}}
+            </optgroup>
+            {{/if}}
+          </select>
+        </label>
+
+        <button type="button" class="shop-btn" data-action="applyArchetype">
+          <i class="fa-solid fa-wand-magic"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.apply"}}
+        </button>
+        <button type="button" class="shop-btn shop-btn--primary" data-action="applyArchetypeStock">
+          <i class="fa-solid fa-boxes-packing"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.applyStock"}}
+        </button>
+      </div>
+
+      {{#with archetypes.chosen}}
+      <div class="shop-archetype-card">
+        <i class="{{icon}} shop-archetype-icon" aria-hidden="true"></i>
+        <div class="shop-archetype-body">
+          <strong class="shop-archetype-name">{{name}}</strong>
+          {{#if hint}}<span class="shop-field-hint">{{hint}}</span>{{/if}}
+          <dl class="shop-archetype-facts">
+            <dt>{{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.stocks"}}</dt>
+            <dd>{{stocks}}{{#if ceiling}} · {{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.ceiling" amount=ceiling}}{{/if}}</dd>
+            <dt>{{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.kinds"}}</dt>
+            <dd>{{kinds}}</dd>
+            <dt>{{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.buys"}}</dt>
+            <dd>{{buys}}</dd>
+            <dt>{{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.restocks"}}</dt>
+            <dd>{{restock}}</dd>
+            <dt>{{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.attitude"}}</dt>
+            <dd>{{attitude}}</dd>
+          </dl>
+        </div>
+      </div>
+      {{/with}}
+
+      <div class="shop-generator-row">
+        <span class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.hint"}}</span>
+        <button type="button" class="shop-btn shop-btn--ghost" data-action="saveArchetype">
+          <i class="fa-solid fa-floppy-disk"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.saveThis"}}
+        </button>
+        {{#unless archetypes.chosen.builtIn}}
+        <button type="button" class="shop-btn shop-btn--danger" data-action="deleteArchetype">
+          <i class="fa-solid fa-trash-can"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.archetype.delete"}}
+        </button>
+        {{/unless}}
+      </div>
+    </fieldset>
+
     <div class="shop-identity">
       <button type="button" class="shop-portrait" data-action="pickPortrait"
               data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.identity.changePortrait'}}"
@@ -538,6 +612,94 @@
       <i class="fa-solid fa-face-smile" aria-hidden="true"></i>
       <h2>{{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.emptyHeading"}}</h2>
       <p>{{localize "sogrom-simple-dnd5e-magic-shop.manager.attitudes.emptyBody"}}</p>
+    </div>
+    {{/if}}
+  </div>
+
+  {{else if (eq tab "ledger")}}
+  {{!-- ---------------------------------------------- Ledger --}}
+  {{!--
+    Every deal this Trader has struck, newest first. Coin is worded from the character's side,
+    like the receipt it mirrors: "Paid" is what they handed over, "Received" what they were given.
+  --}}
+  <div class="shop-ledger" role="tabpanel">
+    {{#if ledger.hasAny}}
+    <div class="shop-generator-row shop-ledger-tools">
+      <label class="shop-field shop-field--inline">
+        <span class="shop-field-label">{{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.show"}}</span>
+        <select data-shop-field="view.ledgerActor">
+          {{#each ledger.filter}}
+          <option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}{{#if count}} ({{count}}){{/if}}</option>
+          {{/each}}
+        </select>
+      </label>
+
+      <p class="shop-ledger-summary">
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.summary"
+           trades=ledger.totals.trades taken=ledger.totals.taken paid=ledger.totals.paid
+           sold=ledger.totals.itemsSold bought=ledger.totals.itemsBought}}
+      </p>
+
+      <button type="button" class="shop-btn shop-btn--danger" data-action="clearLedger">
+        <i class="fa-solid fa-trash-can"></i>
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.clear"}}
+      </button>
+    </div>
+
+    <p class="shop-preview-note">{{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.note" limit=ledger.limit}}</p>
+
+    <table class="shop-stock-table shop-ledger-table">
+      <thead>
+        <tr>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.when"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.who"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.receipt.bought"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.receipt.sold"}}</th>
+          <th scope="col">{{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.coin"}}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each ledger.rows}}
+        <tr class="shop-stock-row">
+          <td class="shop-ledger-when">
+            {{when}}
+            {{#if barter}}<span class="shop-stock-type">{{localize "sogrom-simple-dnd5e-magic-shop.shop.barter"}}</span>{{/if}}
+          </td>
+          <td>
+            <span class="shop-ledger-who">{{actorName}}</span>
+            {{#if payerName}}
+            <span class="shop-stock-type">
+              <i class="fa-solid fa-people-group" aria-hidden="true"></i>
+              {{localize "sogrom-simple-dnd5e-magic-shop.receipt.paidFrom" name=payerName}}
+            </span>
+            {{/if}}
+            {{#if userName}}<span class="shop-stock-type">{{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.by" name=userName}}</span>{{/if}}
+          </td>
+          <td>
+            {{#each bought}}<span class="shop-ledger-line">{{name}}{{#if qty}} &times;{{qty}}{{/if}} <span class="shop-stock-type">{{line}}</span></span>{{else}}<span class="shop-faint">—</span>{{/each}}
+          </td>
+          <td>
+            {{#each sold}}<span class="shop-ledger-line">{{name}}{{#if qty}} &times;{{qty}}{{/if}} <span class="shop-stock-type">{{line}}</span></span>{{else}}<span class="shop-faint">—</span>{{/each}}
+          </td>
+          <td class="shop-ledger-coin">
+            {{#if paid}}{{localize "sogrom-simple-dnd5e-magic-shop.receipt.paid" amount=paid}}
+            {{else if received}}<span class="is-good">{{localize "sogrom-simple-dnd5e-magic-shop.receipt.received" amount=received}}</span>
+            {{else}}{{localize "sogrom-simple-dnd5e-magic-shop.receipt.evenSwap"}}{{/if}}
+            {{#if attitudeGained}}
+            <span class="shop-stock-type">{{localize "sogrom-simple-dnd5e-magic-shop.ledger.goodwill" points=attitudeGained}}</span>
+            {{/if}}
+          </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5" class="shop-faint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.noneForFilter"}}</td></tr>
+        {{/each}}
+      </tbody>
+    </table>
+    {{else}}
+    <div class="shop-empty">
+      <i class="fa-solid fa-book" aria-hidden="true"></i>
+      <h2>{{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.emptyHeading"}}</h2>
+      <p>{{localize "sogrom-simple-dnd5e-magic-shop.manager.ledger.emptyBody"}}</p>
     </div>
     {{/if}}
   </div>

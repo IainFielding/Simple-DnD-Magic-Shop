@@ -67,7 +67,8 @@
         "identity": "Identity",
         "stock": "Stock",
         "trading": "Trading",
-        "attitudes": "Attitudes"
+        "attitudes": "Attitudes",
+        "ledger": "Ledger"
       },
       "delete": {
         "title": "Delete Trader",
@@ -176,6 +177,62 @@
         "forgetHint": "Clear this Trader's memory of them, back to its starting attitude.",
         "emptyHeading": "No characters yet",
         "emptyBody": "Create a player character and this Trader will have an opinion about them."
+      },
+      "archetype": {
+        "legend": "Start from an archetype",
+        "pick": "Archetype",
+        "builtIn": "Built in",
+        "saved": "Saved in this world",
+        "apply": "Apply",
+        "applyStock": "Apply and stock the shelves",
+        "stocks": "Stocks",
+        "ceiling": "nothing over {amount}",
+        "kinds": "Kinds",
+        "buys": "Buys",
+        "restocks": "Restocks",
+        "attitude": "Starting attitude",
+        "attitudeUnchanged": "Left as it is",
+        "buysAnything": "Anything",
+        "anyKind": "Any kind of gear",
+        "restockEvery": "Every {days} days",
+        "hint": "Apply sets what this Trader buys, how often it restocks and how it greets strangers. Its name, greeting, purse, stock and opinions are left alone.",
+        "saveThis": "Save this Trader as an archetype",
+        "delete": "Delete archetype",
+        "applied": "{name} is now set up as: {archetype}.",
+        "saveTitle": "Save as archetype",
+        "saveBody": "Records this Trader's buy filter, restock rule and starting attitude, with the Generate panel's current settings as its stock recipe.",
+        "nameLabel": "Name",
+        "save": "Save",
+        "savedNotice": "Saved the archetype “{name}”.",
+        "deleteTitle": "Delete archetype",
+        "deleteBody": "Delete the archetype <strong>{name}</strong>? Traders already set up from it keep their settings."
+      },
+      "export": {
+        "tooltip": "Export this Trader to a file",
+        "done": "Exported {name} with {count} stock lines."
+      },
+      "import": {
+        "tooltip": "Import a Trader from a file",
+        "title": "Import a Trader",
+        "body": "Choose a Trader file exported from this module. The Trader arrives with its stock, purse and settings, and no memory of anyone.",
+        "button": "Import",
+        "done": "Imported {name} with {count} stock lines."
+      },
+      "ledger": {
+        "show": "Show",
+        "everyone": "Everyone",
+        "summary": "{trades} trades. Took in {taken}, paid out {paid}. Sold {sold} items, bought {bought}.",
+        "clear": "Clear ledger",
+        "note": "The newest {limit} trades are kept. Coin is shown from the character's side, as on the receipt.",
+        "when": "When",
+        "who": "Who",
+        "coin": "Coin",
+        "by": "by {name}",
+        "noneForFilter": "No trades recorded for this character.",
+        "emptyHeading": "No trades yet",
+        "emptyBody": "Every deal struck with this Trader will be recorded here.",
+        "clearTitle": "Clear the ledger",
+        "clearBody": "Forget every trade <strong>{name}</strong> has recorded? Receipts already in chat stay where they are."
       }
     },
     "attitude": {
@@ -232,6 +289,8 @@
       "stockEmpty": "Nothing on the shelves.",
       "packHeading": "Your pack",
       "packEmpty": "You are carrying nothing sellable.",
+      "typeFilter": "Filter by item type",
+      "allTypes": "All items",
       "showing": "{count} shown",
       "noneLeft": "That is all there is.",
       "youTake": "You take",
@@ -252,7 +311,14 @@
       "settling": "Settling…",
       "settled": "Done.",
       "settledWithGoodwill": "Done. They think a little better of you (+{points}).",
-      "coinHeld": "of {held}"
+      "coinHeld": "of {held}",
+      "payFrom": "Pay from",
+      "ownPurse": "Your own coin",
+      "groupPurse": "{name}'s coin",
+      "history": "Your dealings with this trader",
+      "historyHeading": "Your dealings",
+      "historyCount": "{count} recorded",
+      "historyEmpty": "You have not traded here yet."
     },
     "card": {
       "eyebrow": "A trader is open for business",
@@ -267,7 +333,8 @@
       "paid": "Paid {amount}",
       "received": "Received {amount}",
       "evenSwap": "An even swap",
-      "attitude": "+{points} attitude — now {tier}"
+      "attitude": "+{points} attitude — now {tier}",
+      "paidFrom": "From {name}'s purse"
     },
     "error": {
       "noGM": "No GM is online, so the trader is away. Try again when one is.",
@@ -288,7 +355,58 @@
       "barterRefused": "They will not take that — you are {short} short of what they want.",
       "tradeVetoed": "They will not go through with it.",
       "gmOnly": "{call} can only be called by a GM.",
-      "notEnoughCoin": "You only have {qty} {denomination}."
+      "notEnoughCoin": "You only have {qty} {denomination}.",
+      "notYourPurse": "You cannot spend from that purse.",
+      "purseShort": "{name} is {short} short.",
+      "noArchetype": "There is no such archetype.",
+      "archetypeInvalid": "An archetype needs a name.",
+      "archetypeLimit": "A world can save at most {limit} archetypes. Delete one first.",
+      "import": {
+        "notJson": "That file could not be read as a Trader export.",
+        "notATrader": "That file is not a Trader export.",
+        "tooNew": "That Trader was exported by a newer version of this module. Update the module and try again.",
+        "noName": "That export has no Trader name, so it cannot be imported.",
+        "failed": "The Trader could not be created.",
+        "unreadable": "That file could not be read."
+      }
+    },
+    "archetype": {
+      "builtIn": {
+        "general": {
+          "name": "General Store",
+          "hint": "Everyday gear and a few curiosities. Buys anything it could sell on."
+        },
+        "blacksmith": {
+          "name": "Blacksmith",
+          "hint": "Arms, armour and ammunition, and it buys the same."
+        },
+        "apothecary": {
+          "name": "Apothecary",
+          "hint": "Potions, poisons and reagents. Restocks every few days."
+        },
+        "outfitter": {
+          "name": "Outfitter",
+          "hint": "Tools, packs, clothing and rations for the road."
+        },
+        "arcanist": {
+          "name": "Arcanist",
+          "hint": "Scrolls, wands and wondrous things. Buys only magic, and is wary of strangers."
+        },
+        "jeweller": {
+          "name": "Jeweller",
+          "hint": "Gems, art objects and rings. Buys treasure."
+        },
+        "fence": {
+          "name": "Fence",
+          "hint": "A little of everything, no questions asked. Buys anything, and trusts nobody."
+        }
+      }
+    },
+    "ledger": {
+      "day": "Day {day}",
+      "paid": "Paid",
+      "received": "Received",
+      "goodwill": "+{points} attitude"
     }
   }
 }

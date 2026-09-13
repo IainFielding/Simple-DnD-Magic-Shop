@@ -18,6 +18,16 @@
              placeholder="{{localize 'sogrom-simple-dnd5e-magic-shop.common.search'}}"
              aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.common.search'}}">
     </label>
+    {{!-- The item type filter. Lists only the categories this panel holds, in the same words
+          as the Trader Manager's stock generator; hidden when the panel is empty. --}}
+    {{#if stockTypes.length}}
+    <select class="shop-type-filter" data-shop-category="stock"
+            aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.typeFilter'}}">
+      {{#each stockTypes}}
+      <option value="{{value}}" {{#if selected}}selected{{/if}}>{{#if sub}}&nbsp;&nbsp;&ndash; {{/if}}{{label}} ({{count}})</option>
+      {{/each}}
+    </select>
+    {{/if}}
     {{!-- Rewritten by the client-side filter and announced politely. Filtering hides tiles in
           the DOM without a re-render, so a Handlebars number would go stale the moment
           anything is typed. --}}

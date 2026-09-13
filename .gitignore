@@ -27,3 +27,5 @@ test-e2e/*.jsonl
 test-e2e/*.html
 # Dropped by shell.mjs and screenshots.mjs when a run fails — a picture of the broken world.
 test-e2e/failure.png
+# Screenshots of the Ember skin the runner takes for a visual check.
+test-e2e/*.png

@@ -20,6 +20,16 @@
              placeholder="{{localize 'sogrom-simple-dnd5e-magic-shop.common.search'}}"
              aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.common.search'}}">
     </label>
+    {{!-- The item type filter. Lists only the categories this panel holds, in the same words
+          as the Trader Manager's stock generator; hidden when the panel is empty. --}}
+    {{#if packTypes.length}}
+    <select class="shop-type-filter" data-shop-category="pack"
+            aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.shop.typeFilter'}}">
+      {{#each packTypes}}
+      <option value="{{value}}" {{#if selected}}selected{{/if}}>{{#if sub}}&nbsp;&nbsp;&ndash; {{/if}}{{label}} ({{count}})</option>
+      {{/each}}
+    </select>
+    {{/if}}
     <span class="shop-count" data-shop-count aria-live="polite" aria-atomic="true"></span>
   </header>
 

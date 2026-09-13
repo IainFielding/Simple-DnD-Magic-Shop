@@ -32,6 +32,14 @@ describe("sanitizeLine", () => {
     expect(sanitizeLine({ revealAt: 0 }).revealAt).toBe(0);
   });
 
+  it("reads a stored null or blank revealAt back as unset, not as zero", () => {
+    // `Number(null)` is 0. Every line is stored with `revealAt: null`, so without this a
+    // re-read turned "always visible" into "reveal at 0".
+    expect(sanitizeLine({ revealAt: null }).revealAt).toBeNull();
+    expect(sanitizeLine({ revealAt: "" }).revealAt).toBeNull();
+    expect(sanitizeLine(sanitizeLine(defaultLine()))).toEqual(defaultLine());
+  });
+
   it("clamps revealAt into the attitude range", () => {
     expect(sanitizeLine({ revealAt: 500 }).revealAt).toBe(100);
     expect(sanitizeLine({ revealAt: -20 }).revealAt).toBe(0);

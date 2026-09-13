@@ -58,7 +58,11 @@ export function defaultLine() {
 export function sanitizeLine(raw) {
   const line = raw && typeof raw === "object" ? raw : {};
   const override = Number(line.overrideCp);
-  const reveal = Number(line.revealAt);
+  // Blank means unset, and must be checked before `Number()`: `Number(null)` and `Number("")` are
+  // both 0, which made every stored "always visible" line read back as "reveal at 0" — harmless
+  // to who could see it, but the Trader Manager then showed a 0 in a field the GM had left empty.
+  const blank = line.revealAt === null || line.revealAt === undefined || line.revealAt === "";
+  const reveal = blank ? NaN : Number(line.revealAt);
   const base = Number(line.baseQty);
   return {
     unlimited: !!line.unlimited,

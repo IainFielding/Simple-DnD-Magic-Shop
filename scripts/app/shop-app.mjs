@@ -1,7 +1,9 @@
 import { HOOKS, MODULE_ID, fireHook, log, t, tpl } from "../config.mjs";
+import { categoryTokens } from "../data/generate.mjs";
 import { formatCp } from "../data/pricing.mjs";
 import { QUERIES, askGM, gmAvailable } from "../trade/queries.mjs";
 import { ShopShellBase } from "./shell-base.mjs";
+import { categoryOptions } from "./categories.mjs";
 import { yieldTakeoverTo } from "./takeover.mjs";
 import { ShopState } from "./shop-state.mjs";
 
@@ -46,7 +48,8 @@ export class ShopApp extends ShopShellBase {
       setMode: ShopApp.#onSetMode,
       confirmTrade: ShopApp.#onConfirmTrade,
       openLineItem: ShopApp.#onOpenLineItem,
-      refresh: ShopApp.#onRefresh
+      refresh: ShopApp.#onRefresh,
+      toggleHistory: ShopApp.#onToggleHistory
     }
   };
 
@@ -76,6 +79,18 @@ export class ShopApp extends ShopShellBase {
   #traderId = "";
   #actorId = "";
 
+  /**
+   * The Group whose purse this deal pays from, or "" for the character's own.
+   *
+   * Held as a choice rather than trusted as a right: it is sent with every request and the GM
+   * re-checks it each time, so a Group the player loses ownership of mid-shop is refused on the
+   * next refresh rather than spent from.
+   */
+  #payerId = "";
+
+  /** Whether the counter is showing this character's past dealings instead of the deal. */
+  #showHistory = false;
+
   /** Set while a confirmation is in flight, so the button cannot be double-submitted. */
   #settling = false;
 
@@ -89,9 +104,10 @@ export class ShopApp extends ShopShellBase {
    * @param {object} params
    * @param {string} params.traderId
    * @param {object|string} [params.actor]  Defaults to the user's assigned character.
+   * @param {object|string} [params.payer]  A Group to pay from; the character's own purse if omitted.
    * @returns {Promise<ShopApp|null>}
    */
-  static async open({ traderId, actor } = {}) {
+  static async open({ traderId, actor, payer } = {}) {
     const character = resolveCharacter(actor);
     if ( !character ) {
       ui.notifications.warn(t("error.noAssignedCharacter"));
@@ -113,6 +129,7 @@ export class ShopApp extends ShopShellBase {
     const app = new this();
     app.#traderId = traderId;
     app.#actorId = character.id;
+    app.#payerId = (typeof payer === "object" ? payer?.id : payer) ?? "";
 
     // Fetch before the first render, so the window never appears empty and then fill in — and
     // so a refusal (no such Trader, not your character, a `preOpenShop` veto) surfaces as a
@@ -147,7 +164,8 @@ export class ShopApp extends ShopShellBase {
   async refresh({ render = true } = {}) {
     const context = await askGM(QUERIES.context, {
       traderId: this.#traderId,
-      actorId: this.#actorId
+      actorId: this.#actorId,
+      payerId: this.#payerId || undefined
     });
     this.#state.adopt(context);
     if ( render ) await this.render();
@@ -160,16 +178,29 @@ export class ShopApp extends ShopShellBase {
     if ( !context ) return Object.assign(base, { ready: false });
 
     const totals = this.#state.totals();
+    const purse = this.#state.purse;
     return Object.assign(base, {
       ready: true,
       trader: context.trader,
       actor: context.actor,
+      purse,
+      purses: context.purses ?? [],
+      // Read by a screen reader beside the figure: whose coin it is changes what it means.
+      purseLabel: purse?.own === false
+        ? t("shop.groupPurse", { name: purse.name })
+        : t("shop.yourPurse"),
+      showHistory: this.#showHistory,
+      history: context.history ?? [],
       attitude: context.attitude,
       multipliers: context.multipliers,
       mode: this.#state.mode,
       barter: this.#state.mode === "barter",
       stock: context.stock.map(line => this.#tile(line, "take")),
       pack: context.pack.map(line => this.#tile(line, "give")),
+      // Only the categories each panel actually holds, so the dropdown never offers a choice
+      // that would empty the panel.
+      stockTypes: categoryOptions(context.stock, this.#state.category.stock),
+      packTypes: categoryOptions(context.pack, this.#state.category.pack),
       staged: {
         take: this.#stagedRows("take"),
         give: this.#stagedRows("give")
@@ -178,7 +209,7 @@ export class ShopApp extends ShopShellBase {
       // "You owe 568" and "You receive 568" are the same figure and opposite situations, so the
       // coin partial is toned rather than the player having to read a sign.
       netTone: totals.owed ? "" : "good",
-      coins: this.#coinSlots(context.actor),
+      coins: this.#coinSlots(purse),
       empty: this.#state.empty,
       settling: this.#settling,
       // The button is enabled only when the deal could actually go through. The GM still
@@ -207,6 +238,8 @@ export class ShopApp extends ShopShellBase {
       qty: line.unlimited ? 0 : line.qty,
       unlimited: line.unlimited,
       price: line.price,
+      // Space-separated category tokens, read by the type filter without a re-render.
+      categories: categoryTokens(line).join(" "),
       staged,
       // Two different states, deliberately kept apart.
       //
@@ -264,9 +297,11 @@ export class ShopApp extends ShopShellBase {
     const active = document.activeElement;
     this.#focus = null;
     if ( !active || !this.element?.contains(active) ) return;
-    const selector = active.dataset.shopSearch !== undefined
-      ? `[data-shop-search="${active.dataset.shopSearch}"]`
-      : active.dataset.shopCoin !== undefined ? `[data-shop-coin="${active.dataset.shopCoin}"]` : "";
+    const { shopSearch, shopCoin, shopCategory, shopPayer } = active.dataset;
+    const selector = shopSearch !== undefined ? `[data-shop-search="${shopSearch}"]`
+      : shopCoin !== undefined ? `[data-shop-coin="${shopCoin}"]`
+        : shopCategory !== undefined ? `[data-shop-category="${shopCategory}"]`
+          : shopPayer !== undefined ? "[data-shop-payer]" : "";
     if ( !selector ) return;
     // Number inputs have no selection API; reading it throws in some browsers.
     let start = null;
@@ -283,6 +318,7 @@ export class ShopApp extends ShopShellBase {
     super._onRender(context, options);
     this.#wireSearch();
     this.#wireCoinFields();
+    this.#wirePayer();
     this.#wireRightClick();
     this.#restoreFocus();
   }
@@ -335,23 +371,35 @@ export class ShopApp extends ShopShellBase {
   }
 
   /**
-   * The panel search boxes.
+   * The panel filters: the search box and the item type dropdown.
    *
    * Filtered **client-side with no re-render**, which is the whole point: a re-render per
    * keystroke would rebuild the tile grid, lose the input's focus and caret, and make the box
-   * unusable. The needle is kept on the state so it survives a real re-render, and the visible
+   * unusable. Both values are kept on the state so they survive a real re-render, and the visible
    * count is rewritten here rather than in Handlebars because a templated number would go stale
-   * the moment anything is typed.
+   * the moment anything is typed or chosen.
    */
   #wireSearch() {
     for ( const input of this.element.querySelectorAll("[data-shop-search]") ) {
       const key = input.dataset.shopSearch;
       input.value = this.#state.search[key] ?? "";
       if ( this.#firstWiring(input) ) {
-        input.addEventListener("input", () => this.#applySearch(key, input));
+        input.addEventListener("input", () => {
+          this.#state.search[key] = input.value ?? "";
+          this.#applyFilters(key);
+        });
       }
-      this.#applySearch(key, input);
     }
+    for ( const select of this.element.querySelectorAll("[data-shop-category]") ) {
+      const key = select.dataset.shopCategory;
+      if ( this.#firstWiring(select) ) {
+        select.addEventListener("change", () => {
+          this.#state.category[key] = select.value;
+          this.#applyFilters(key);
+        });
+      }
+    }
+    for ( const key of ["stock", "pack"] ) this.#applyFilters(key);
   }
 
   /**
@@ -371,18 +419,23 @@ export class ShopApp extends ShopShellBase {
     return true;
   }
 
-  /** Hide the tiles in one panel that do not match, and update its count. */
-  #applySearch(key, input) {
-    this.#state.search[key] = input.value ?? "";
-    const needle = this.#state.search[key].trim().toLowerCase();
-    const panel = input.closest(".shop-panel");
+  /**
+   * Hide the tiles in one panel that match neither filter, and update its count. A tile shows
+   * only when it matches **both** the search text and the chosen type.
+   * @param {"stock"|"pack"} key
+   */
+  #applyFilters(key) {
+    const panel = this.element.querySelector(`.shop-panel--${key}`);
     if ( !panel ) return;
+    const needle = (this.#state.search[key] ?? "").trim().toLowerCase();
+    const category = this.#state.category[key] ?? "";
 
     let shown = 0;
     for ( const tile of panel.querySelectorAll(".shop-tile[data-name]") ) {
-      const match = !needle || (tile.dataset.name ?? "").toLowerCase().includes(needle);
-      tile.classList.toggle("is-filtered", !match);
-      if ( match ) shown++;
+      const named = !needle || (tile.dataset.name ?? "").toLowerCase().includes(needle);
+      const typed = !category || (tile.dataset.categories ?? "").split(" ").includes(category);
+      tile.classList.toggle("is-filtered", !(named && typed));
+      if ( named && typed ) shown++;
     }
     const count = panel.querySelector("[data-shop-count]");
     if ( count ) count.textContent = t("shop.showing", { count: shown });
@@ -410,6 +463,35 @@ export class ShopApp extends ShopShellBase {
         this.render({ parts: ["footer"] });
       });
     }
+  }
+
+  /**
+   * The purse picker: pay from the character's own coin or from a Group's.
+   *
+   * Choosing re-asks the GM for the whole context rather than swapping a figure locally, because
+   * the GM is who decides the choice is allowed — and a refusal (ownership revoked, membership
+   * gone) falls back to the character's own purse with a notice, instead of leaving the picker
+   * showing a purse the deal cannot use.
+   *
+   * Staged coin is dropped on a switch: coins offered from the party fund are not coins in the
+   * character's pocket, and carrying the numbers across would offer the wrong purse's money.
+   */
+  #wirePayer() {
+    const select = this.element.querySelector("[data-shop-payer]");
+    if ( !select || !this.#firstWiring(select) ) return;
+    select.addEventListener("change", async () => {
+      const chosen = select.value === this.#actorId ? "" : select.value;
+      if ( chosen === this.#payerId ) return;
+      this.#payerId = chosen;
+      this.#state.coins = {};
+      try {
+        await this.refresh();
+      } catch ( err ) {
+        ui.notifications.warn(err.message);
+        this.#payerId = "";
+        await this.refresh().catch(() => this.render());
+      }
+    });
   }
 
   /**
@@ -465,6 +547,12 @@ export class ShopApp extends ShopShellBase {
     this.render();
   }
 
+  /** Swap the counter for this character's history with the Trader, and back. */
+  static #onToggleHistory() {
+    this.#showHistory = !this.#showHistory;
+    this.render({ parts: ["topbar", "stage"] });
+  }
+
   static async #onRefresh() {
     try {
       await this.refresh();
@@ -492,6 +580,7 @@ export class ShopApp extends ShopShellBase {
       const result = await askGM(QUERIES.trade, {
         traderId: this.#traderId,
         actorId: this.#actorId,
+        payerId: this.#payerId || undefined,
         ...this.#state.intent()
       });
       this.#state.clear();
@@ -611,7 +700,10 @@ export class ShopApp extends ShopShellBase {
   /** Whether this window is a shop for, or at, this actor. */
   #involves(actorId) {
     const context = this.#state.context;
+    // The paying Group counts too: another member spending the party fund changes what this
+    // player can afford.
     return actorId === this.#actorId || actorId === this.#traderId
+      || (!!this.#payerId && actorId === this.#payerId)
       || actorId === context?.trader?.id || actorId === context?.actor?.id;
   }
 

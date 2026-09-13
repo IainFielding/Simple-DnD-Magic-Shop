@@ -50,13 +50,14 @@ class Report {
 }
 
 async function load() {
-  const [registry, trader, pricing, transaction] = await Promise.all([
+  const [registry, trader, pricing, transaction, context] = await Promise.all([
     import(`${BASE}/data/registry.mjs`),
     import(`${BASE}/data/trader.mjs`),
     import(`${BASE}/data/pricing.mjs`),
-    import(`${BASE}/trade/transaction.mjs`)
+    import(`${BASE}/trade/transaction.mjs`),
+    import(`${BASE}/trade/context.mjs`)
   ]);
-  return { registry, trader, pricing, transaction };
+  return { registry, trader, pricing, transaction, context };
 }
 
 /** A Trader with exactly known stock and purse. */
@@ -594,6 +595,186 @@ export async function raceSuite() {
 
 /* -------------------------------------------- */
 
+/**
+ * The ledger: every settled trade is recorded on the Trader, newest first, and a character's shop
+ * is sent only their own.
+ */
+export async function ledgerSuite() {
+  const report = new Report();
+  const mod = await load();
+  let trader; let buyer; let other; let copy;
+  try {
+    trader = await freshTrader(mod, { name: `${PREFIX} Ledger Till` });
+    buyer = await freshShopper(`${PREFIX} Ledger Buyer`);
+    other = await freshShopper(`${PREFIX} Ledger Stranger`);
+    report.equal("a new Trader starts with an empty ledger", mod.trader.ledgerOf(trader), []);
+
+    const blade = stockOf(trader, "Blade");
+    await mod.transaction.settle({
+      trader, actor: buyer,
+      intent: { mode: "trade", buy: [{ id: blade.id, qty: 1 }], sell: [], goldCp: 0 }
+    });
+    const dagger = buyer.items.find(i => i.name.includes("Old Dagger"));
+    await mod.transaction.settle({
+      trader, actor: buyer,
+      intent: { mode: "trade", buy: [], sell: [{ id: dagger.id, qty: 1 }], goldCp: 0 }
+    });
+
+    const ledger = mod.trader.ledgerOf(trader);
+    report.equal("each settled trade is recorded", ledger.length, 2);
+    report.check("newest first", ledger[0]?.sold?.length === 1 && ledger[1]?.bought?.length === 1,
+      JSON.stringify(ledger.map(e => ({ bought: e.bought.length, sold: e.sold.length }))));
+    report.equal("with the settled figures", ledger[1]?.costCp, 1100);
+    report.check("a sale records a negative net, which is the character being paid",
+      ledger[0]?.netCp < 0, ledger[0]?.netCp);
+    report.equal("under the character's name", ledger[1]?.actorName, buyer.name);
+    report.equal("and the name of who pressed the button", ledger[1]?.userName, game.user.name);
+    report.check("with no Group named when the character paid for themselves",
+      ledger[1]?.payerId === null);
+
+    // A refused trade leaves no row.
+    let refused = false;
+    try {
+      await mod.transaction.settle({
+        trader, actor: buyer,
+        intent: { mode: "trade", buy: [{ id: blade.id, qty: 99 }], sell: [], goldCp: 0 }
+      });
+    } catch {
+      refused = true;
+    }
+    report.check("an impossible trade is refused", refused);
+    report.equal("and a refused trade is not recorded", mod.trader.ledgerOf(trader).length, 2);
+
+    const mine = mod.context.buildShopContext(trader, buyer);
+    report.equal("the buyer's shop is sent their own history", mine.history?.length, 2);
+    report.check("formatted for display", typeof mine.history?.[0]?.when === "string"
+      && !!mine.history[0].when, JSON.stringify(mine.history?.[0]));
+    report.equal("a stranger's shop is sent none of it",
+      mod.context.buildShopContext(trader, other).history?.length, 0);
+
+    copy = await mod.registry.duplicateTrader(trader.id);
+    report.equal("a duplicate Trader has sold nothing to anybody", mod.trader.ledgerOf(copy), []);
+
+    await mod.trader.clearLedger(trader);
+    report.equal("clearing empties it", mod.trader.ledgerOf(trader), []);
+  } catch ( err ) {
+    report.fail("ledgerSuite threw", err);
+  } finally {
+    for ( const doc of [trader, buyer, other, copy] ) if ( doc ) await doc.delete().catch(() => {});
+  }
+  return report.summary;
+}
+
+/**
+ * Paying from a Group: allowed only for a member whose user owns the Group, and when allowed the
+ * Group's coin moves while the goods and the goodwill stay with the character.
+ */
+export async function partySuite() {
+  const report = new Report();
+  const mod = await load();
+  let trader; let buyer; let group; let stranger; let loner; let observed;
+  try {
+    trader = await freshTrader(mod, { name: `${PREFIX} Party Till` });
+    buyer = await freshShopper(`${PREFIX} Party Member`, { gp: 0 });
+    const player = game.users.find(u => !u.isGM);
+    if ( !report.check("a player user exists to test ownership with", !!player) ) return report.summary;
+
+    group = await Actor.create({
+      name: `${PREFIX} Company`,
+      type: "group",
+      system: { members: [{ actor: buyer.id }], currency: { pp: 0, gp: 100, ep: 0, sp: 0, cp: 0 } },
+      ownership: { default: 0, [player.id]: CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER }
+    });
+    stranger = await Actor.create({
+      name: `${PREFIX} Other Company`,
+      type: "group",
+      system: { members: [], currency: { pp: 0, gp: 100, ep: 0, sp: 0, cp: 0 } },
+      ownership: { default: 0, [player.id]: CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER }
+    });
+
+    const payer = (payerId, user) => mod.context.resolvePayer({ actor: buyer, payerId }, user);
+    const refuses = (payerId, user) => {
+      try {
+        payer(payerId, user);
+        return false;
+      } catch {
+        return true;
+      }
+    };
+
+    /* --- Who may pay ---------------------------------------------------- */
+    report.check("no payer means the character's own purse", payer(undefined, player) === buyer);
+    report.check("a member's owning player may pay from the Group", payer(group.id, player) === group);
+    report.check("so may a GM", payer(group.uuid, game.user) === group);
+    report.check("a Group the character is not in is refused, even to its owner",
+      refuses(stranger.id, player));
+    report.check("an actor that is not a Group is refused", refuses(trader.id, game.user));
+
+    // A second Group the character *is* in, which the player can see but does not own. Created
+    // with those rights rather than by editing the first Group's ownership: Foundry's own
+    // `Actor#_onUpdate` calls `canvas.tokens.cycleTokens()` on every player client when ownership
+    // changes, and these player clients run without a canvas, so the edit would log an error on
+    // each of them that has nothing to do with this module.
+    observed = await Actor.create({
+      name: `${PREFIX} Watched Company`,
+      type: "group",
+      system: { members: [{ actor: buyer.id }], currency: { pp: 0, gp: 100, ep: 0, sp: 0, cp: 0 } },
+      ownership: { default: 0, [player.id]: CONST.DOCUMENT_OWNERSHIP_LEVELS.OBSERVER }
+    });
+    report.check("membership alone is not enough without ownership", refuses(observed.id, player));
+
+    /* --- The shop's payload --------------------------------------------- */
+    const context = mod.context.buildShopContext(trader, buyer, { payer: group, user: player });
+    report.equal("the shop prices against the Group's purse", context.purse?.id, group.id);
+    report.equal("and offers both purses to choose between",
+      context.purses?.map(p => p.id), [buyer.id, group.id]);
+    loner = await freshShopper(`${PREFIX} Loner`);
+    report.equal("a character in no Group is offered no choice at all",
+      mod.context.buildShopContext(trader, loner, { user: player }).purses, []);
+
+    /* --- Settling --------------------------------------------------------- */
+    const blade = stockOf(trader, "Blade");
+    const receipt = await mod.transaction.settle({
+      trader, actor: buyer, payer: group, user: player,
+      intent: { mode: "trade", buy: [{ id: blade.id, qty: 1 }], sell: [], goldCp: 0 }
+    });
+    report.equal("the Group's purse pays", cpOf(mod, group), 10_000 - 1100);
+    report.equal("the character's own purse is untouched", cpOf(mod, buyer), 0);
+    report.check("the character receives the item", buyer.items.some(i => i.name.includes("Blade")));
+    report.equal("the receipt names the Group", receipt.payer?.id, group.id);
+    report.equal("the ledger records who paid", mod.trader.ledgerOf(trader)[0]?.payerName, group.name);
+
+    const dagger = buyer.items.find(i => i.name.includes("Old Dagger"));
+    const groupBefore = cpOf(mod, group);
+    await mod.transaction.settle({
+      trader, actor: buyer, payer: group,
+      intent: { mode: "trade", buy: [], sell: [{ id: dagger.id, qty: 1 }], goldCp: 0 }
+    });
+    report.check("a sale while the Group pays puts the proceeds in the Group's purse",
+      cpOf(mod, group) > groupBefore && cpOf(mod, buyer) === 0,
+      `group ${groupBefore} -> ${cpOf(mod, group)}, own ${cpOf(mod, buyer)}`);
+
+    await group.update({ "system.currency": { pp: 0, gp: 0, ep: 0, sp: 0, cp: 0 } });
+    let message = "";
+    try {
+      await mod.transaction.settle({
+        trader, actor: buyer, payer: group,
+        intent: { mode: "trade", buy: [{ id: blade.id, qty: 1 }], sell: [], goldCp: 0 }
+      });
+    } catch ( err ) {
+      message = err.message;
+    }
+    report.check("an empty Group purse is refused, naming the Group", message.includes(group.name), message);
+  } catch ( err ) {
+    report.fail("partySuite threw", err);
+  } finally {
+    for ( const doc of [trader, buyer, group, stranger, loner, observed] ) if ( doc ) await doc.delete().catch(() => {});
+  }
+  return report.summary;
+}
+
+/* -------------------------------------------- */
+
 /** Run every settlement suite. */
 export async function all() {
   const suites = {
@@ -604,7 +785,9 @@ export async function all() {
     prePrice: prePriceSuite,
     barter: barterSuite,
     currency: currencySuite,
-    race: raceSuite
+    race: raceSuite,
+    ledger: ledgerSuite,
+    party: partySuite
   };
   const out = {};
   for ( const [name, fn] of Object.entries(suites) ) {

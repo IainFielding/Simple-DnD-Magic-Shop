@@ -5,6 +5,10 @@ import { clampAttitude, emptySpend, recordSpend, sanitizeSpend, adjustAttitude }
 import { defaultRestock, dueForRestock, restockPlan, sanitizeRestock } from "./restock.mjs";
 import { defaultBuyFilter, defaultLine, sanitizeBuyFilter, sanitizeLine } from "./stock.mjs";
 import { serialised } from "./serial.mjs";
+import { appendEntry, sanitizeLedger } from "./ledger.mjs";
+import { archetypeUpdate, sanitizeRecipe } from "./archetypes.mjs";
+import { budgetTotal, filterPool, pickByBudget } from "./generate.mjs";
+import { itemPool } from "./item-index.mjs";
 
 /**
  * Reading and writing a Trader.
@@ -501,7 +505,8 @@ export function newTraderData({ name, img, greeting = "", startingAttitude, fold
         spend: {},
         attitudeGain: null,
         buyFilter: defaultBuyFilter(),
-        restock: defaultRestock()
+        restock: defaultRestock(),
+        ledger: []
       }
     }
   };
@@ -511,7 +516,8 @@ export function newTraderData({ name, img, greeting = "", startingAttitude, fold
  * Strip a Trader's per-character history, for a duplicate.
  *
  * A copied Trader must not inherit the original's opinions: "the same shop in the next town"
- * is the common reason to duplicate one, and it has never met the party.
+ * is the common reason to duplicate one, and it has never met the party. Nor its ledger — the
+ * copy has sold nothing to anybody.
  * @param {object} data  Actor data from `toObject()`.
  * @returns {object}
  */
@@ -519,8 +525,99 @@ export function clearHistory(data) {
   const flags = data.flags?.[MODULE_ID] ?? {};
   return {
     ...data,
-    flags: { ...data.flags, [MODULE_ID]: { ...flags, attitude: {}, spend: {} } }
+    flags: { ...data.flags, [MODULE_ID]: { ...flags, attitude: {}, spend: {}, ledger: [] } }
   };
+}
+
+/* -------------------------------------------- */
+/*  The ledger                                  */
+/* -------------------------------------------- */
+
+/**
+ * A Trader's ledger, guarded and newest first.
+ *
+ * Kept out of {@link traderData} on purpose. That is read on every price and every attitude
+ * lookup, and sanitising a hundred ledger entries each time would be work nobody asked for.
+ * @param {object} actor
+ * @returns {import("./ledger.mjs").LedgerEntry[]}
+ */
+export function ledgerOf(actor) {
+  return sanitizeLedger(actor?.flags?.[MODULE_ID]?.ledger);
+}
+
+/**
+ * Add one settled trade to a Trader's ledger.
+ *
+ * Only ever called from inside the settlement queue, so two trades finishing together cannot
+ * each read the old ledger and write back a copy missing the other's entry.
+ * @param {object} actor
+ * @param {import("./ledger.mjs").LedgerEntry} entry
+ * @returns {Promise<void>}
+ */
+export async function recordTrade(actor, entry) {
+  await actor.setFlag(MODULE_ID, "ledger", appendEntry(ledgerOf(actor), entry));
+}
+
+/**
+ * Empty a Trader's ledger. Goes through the settlement queue, for the same reason as a restock:
+ * a clear landing mid-settlement must not be overwritten by the ledger that settlement read.
+ * @param {object} actor
+ * @returns {Promise<void>}
+ */
+export function clearLedger(actor) {
+  return serialised(async () => {
+    await actor.setFlag(MODULE_ID, "ledger", []);
+    logTrader(actor, "ledger cleared");
+  });
+}
+
+/* -------------------------------------------- */
+/*  Archetypes                                  */
+/* -------------------------------------------- */
+
+/**
+ * Give a Trader an archetype's character: its buy filter, restock rule and starting attitude.
+ *
+ * Leaves the stock alone. Whether to fill the shelves too is a separate decision, made with
+ * {@link stockFromRecipe} — a GM re-theming a shop they have already stocked by hand does not want
+ * twenty more items dropped on top.
+ * @param {object} actor
+ * @param {import("./archetypes.mjs").Archetype} archetype
+ * @returns {Promise<void>}
+ */
+export async function applyArchetype(actor, archetype) {
+  const update = archetypeUpdate(archetype);
+  if ( !Object.keys(update).length ) return;
+  await actor.update(update);
+  logTrader(actor, `archetype applied: ${archetype.id}`);
+}
+
+/**
+ * Fill a Trader's shelves from a stock recipe.
+ *
+ * The one path generation goes through, whether the GM pressed Generate in the Stock tab, applied
+ * an archetype with stock, or a macro called the API — so all three honour the same narrowing,
+ * report the same shortfalls, and merge into existing lines the same way.
+ * @param {object} actor
+ * @param {import("./archetypes.mjs").Recipe} recipe
+ * @param {object} [options]
+ * @param {() => number} [options.rng]  Injected for a reproducible run.
+ * @returns {Promise<{picked: number, shortfalls: Record<string, number>, created: object[],
+ *   raised: object[], failed: string[], rejected: object[]}>}
+ */
+export async function stockFromRecipe(actor, recipe, { rng = Math.random } = {}) {
+  const r = sanitizeRecipe(recipe);
+  const empty = { picked: 0, shortfalls: {}, created: [], raised: [], failed: [], rejected: [] };
+  if ( budgetTotal(r.budget) <= 0 ) return empty;
+
+  const pool = filterPool(await itemPool(), {
+    packs: r.packs, categories: r.categories, maxValueCp: r.maxValueCp
+  });
+  const { picked, shortfalls } = pickByBudget({ pool, budget: r.budget, rng });
+  if ( !picked.length ) return { ...empty, shortfalls };
+
+  const result = await addStockItems(actor, picked.map(entry => entry.uuid));
+  return { picked: picked.length, shortfalls, ...result };
 }
 
 /* -------------------------------------------- */

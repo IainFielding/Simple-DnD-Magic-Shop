@@ -73,6 +73,9 @@ export async function managerSuite() {
     own.click();
     await settle();
 
+    const overlap = railOverlap(root);
+    report.check("no two Traders in the rail overlap", !overlap, overlap);
+
     report.check("its chrome is present", !!root.querySelector(".shop-topbar"));
     report.check("the Trader rail is present", !!root.querySelector(".shop-rail"));
     report.check("the new Trader is listed",
@@ -95,7 +98,12 @@ export async function managerSuite() {
         ["the name field carries the Trader's name",
           el => el.querySelector('[data-shop-field="name"]')?.value?.includes(PREFIX)],
         ["the purse offers a slot per denomination",
-          el => el.querySelectorAll('[data-shop-field="currency"]').length >= 3]
+          el => el.querySelectorAll('[data-shop-field="currency"]').length >= 3],
+        ["the archetype picker lists the built-ins",
+          el => el.querySelectorAll('[data-shop-field="view.archetype"] option').length >= 7],
+        ["and spells the chosen archetype out before it is applied",
+          el => el.querySelectorAll(".shop-archetype-facts dd").length === 5
+            && [...el.querySelectorAll(".shop-archetype-facts dd")].every(dd => dd.textContent.trim())]
       ],
       stock: [
         ["the stock table has a row for the stocked item",
@@ -119,6 +127,10 @@ export async function managerSuite() {
           el => el.querySelectorAll('[data-shop-field="restockMode"] option').length >= 3],
         ["the goodwill override is offered",
           el => !!el.querySelector('[data-shop-field="gainCustom"]')]
+      ],
+      ledger: [
+        ["a Trader that has not traded shows the empty ledger",
+          el => !!el.querySelector(".shop-ledger .shop-empty")]
       ],
       attitudes: [
         ["a row per player character",
@@ -336,6 +348,16 @@ export async function shopSuite(mode = "windowed") {
     report.check("the chrome is present", !!root.querySelector(".shop-topbar--shop"));
     report.check("the attitude meter is present", !!root.querySelector(".shop-attitude-track"));
 
+    // Both portraits at their full size — measured, because an image in a flex row is exactly the
+    // thing that quietly shrinks when a neighbour needs the room.
+    const portraits = [...root.querySelectorAll(".shop-party-img")].map(img => {
+      const rect = img.getBoundingClientRect();
+      return `${Math.round(rect.width)}x${Math.round(rect.height)}`;
+    });
+    report.check("both portraits are shown at 300x300",
+      portraits.length === 2 && portraits.every(size => size === "300x300"),
+      `portraits measure ${portraits.join(", ") || "nothing"}`);
+
     // The rate line is worded from the Trader's side — it buys your goods low and sells to you
     // high — so the "buying" figure must be the smaller one. Asserted on the relationship rather
     // than exact values, because the no-arbitrage rule guarantees it for every character at
@@ -348,6 +370,22 @@ export async function shopSuite(mode = "windowed") {
       `rate line reads "${rate.trim()}"`);
     report.check("the counter is present", !!root.querySelector(".shop-panel--stage"));
     report.check("the footer is present", !!root.querySelector(".shop-footer"));
+
+    // The history toggle swaps the counter for the character's dealings and back, without
+    // losing the counter itself.
+    root.querySelector('[data-action="toggleHistory"]')?.click();
+    await settle();
+    report.check("the history toggle shows this character's dealings in place of the counter",
+      !!app.element.querySelector(".shop-panel--stage .shop-history")
+        && !app.element.querySelector(".shop-panel--stage [data-shop-offer-total]"));
+    report.check("an untraded character is told so",
+      !!app.element.querySelector(".shop-history .shop-stage-empty"));
+    app.element.querySelector('[data-action="toggleHistory"]')?.click();
+    await settle();
+    report.check("and toggling again brings the counter back",
+      !!app.element.querySelector(".shop-panel--stage [data-shop-offer-total]"));
+    report.check("a character in no Group is offered no purse choice",
+      !app.element.querySelector("[data-shop-payer]"));
     report.check("no raw localisation key leaked into the markup",
       !root.textContent.includes(MODULE), rawKeys(root));
 
@@ -574,6 +612,304 @@ export async function shopSuite(mode = "windowed") {
 }
 
 /* -------------------------------------------- */
+/*  The item type filter                        */
+/* -------------------------------------------- */
+
+/**
+ * The type dropdown on each panel: it lists only what the panel holds, filters without a
+ * re-render, combines with the search box, and lets go of a type that has sold out.
+ */
+export async function typeFilterSuite() {
+  const report = new Report();
+  const api = game.modules.get(MODULE)?.api;
+  let trader = null;
+  let app = null;
+
+  const line = (name, type, subtype, gp) => ({
+    name: `${PREFIX} ${name}`, type,
+    system: { quantity: 2, price: { value: gp, denomination: "gp" }, type: { value: subtype } },
+    flags: { [MODULE]: { unlimited: false, overrideCp: null, revealAt: null, baseQty: 2 } }
+  });
+
+  try {
+    trader = await api.createTrader({ name: `${PREFIX} Filter Stall` });
+    await trader.createEmbeddedDocuments("Item", [
+      line("Dagger", "weapon", "simpleM", 2),
+      line("Longsword", "weapon", "martialM", 15),
+      line("Plate", "equipment", "heavy", 1500),
+      line("Ruby", "loot", "gem", 50)
+    ]);
+    const character = game.actors.find(a => a.name === `${PREFIX} Thog`);
+    app = await api.openShop(trader.id, { actor: character });
+    await settle();
+
+    const select = () => app.element.querySelector('[data-shop-category="stock"]');
+    const visible = () => [...app.element.querySelectorAll(".shop-panel--stock .shop-tile")]
+      .filter(tile => !tile.classList.contains("is-filtered"))
+      .map(tile => tile.dataset.name.replace(`${PREFIX} `, "")).sort();
+    const choose = async value => {
+      select().value = value;
+      select().dispatchEvent(new Event("change", { bubbles: true }));
+      await settle();
+    };
+
+    if ( !report.check("the stock panel has an item type dropdown", !!select()) ) return report.summary;
+    const values = [...select().options].map(o => o.value);
+    report.check("it offers exactly the categories on the shelves",
+      JSON.stringify([...values].sort()) === JSON.stringify(["", "equipment", "equipment:heavy", "loot",
+        "loot:gem", "weapon", "weapon:martialM", "weapon:simpleM"].sort()), values.join(", "));
+    report.check("and nothing the shelves do not hold", !values.includes("consumable") && !values.includes("tool"));
+    report.check("with All items first", values[0] === "" && select().value === "");
+
+    await choose("weapon");
+    report.check("choosing a type shows every item of it",
+      JSON.stringify(visible()) === JSON.stringify(["Dagger", "Longsword"]), visible().join(", "));
+
+    await choose("equipment:heavy");
+    report.check("choosing a subtype shows only that subtype",
+      JSON.stringify(visible()) === JSON.stringify(["Plate"]), visible().join(", "));
+    report.check("the panel count follows the filter",
+      /(^|\D)1(\D|$)/.test(app.element.querySelector(".shop-panel--stock [data-shop-count]")?.textContent ?? ""),
+      app.element.querySelector(".shop-panel--stock [data-shop-count]")?.textContent);
+
+    // Search and type together: a tile must match both.
+    await choose("weapon");
+    const search = app.element.querySelector('[data-shop-search="stock"]');
+    search.value = "long";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    report.check("the type filter and the search box combine",
+      JSON.stringify(visible()) === JSON.stringify(["Longsword"]), visible().join(", "));
+    search.value = "";
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+
+    await app.render();
+    await settle();
+    report.check("the chosen type survives a re-render",
+      select()?.value === "weapon" && JSON.stringify(visible()) === JSON.stringify(["Dagger", "Longsword"]),
+      `${select()?.value}: ${visible().join(", ")}`);
+
+    // The pack panel offers only what the character carries.
+    const packSelect = app.element.querySelector('[data-shop-category="pack"]');
+    const packTiles = [...app.element.querySelectorAll(".shop-panel--pack .shop-tile")];
+    if ( packTiles.length ) {
+      const held = new Set(packTiles.flatMap(tile => tile.dataset.categories.split(" ")));
+      const offered = [...(packSelect?.options ?? [])].map(o => o.value).filter(Boolean);
+      report.check("the pack's dropdown lists only what the character carries",
+        !!packSelect && offered.every(value => held.has(value)), offered.join(", "));
+    }
+
+    // The last of a type sells out while it is selected: the filter lets go.
+    await choose("loot");
+    await trader.items.find(i => i.name.includes("Ruby")).delete();
+    await new Promise(resolve => setTimeout(resolve, 900));
+    report.check("when the chosen type sells out the filter returns to All items",
+      select()?.value === "" && visible().length === 3, `${select()?.value}: ${visible().join(", ")}`);
+    report.check("and no longer offers the type that sold out",
+      ![...select().options].some(o => o.value === "loot"));
+  } catch ( err ) {
+    report.fail("typeFilterSuite threw", err);
+  } finally {
+    await app?.close().catch(() => {});
+    if ( trader ) await trader.delete().catch(() => {});
+  }
+  return report.summary;
+}
+
+/* -------------------------------------------- */
+/*  The Ember skin                              */
+/* -------------------------------------------- */
+
+/**
+ * Every file styles/ember-skin.css borrows from Ember's own folder. Kept in step with the asset
+ * manifest at the top of that file: a file Ember renames in a release breaks the skin silently,
+ * and fetching each one is the only thing that notices.
+ */
+const EMBER_ASSETS = [
+  "ui/elements/codex-background-dark.webp",
+  "ui/elements/cosmos-design-weathered.webp",
+  "ui/borders/BlockActorRing.webp"
+];
+
+/** What `emberSuite` leaves open for the runner to photograph, and `closeEmberFixture` undoes. */
+let emberFixture = null;
+
+/**
+ * Open the shop and the manager as they would look in an Ember world.
+ *
+ * Ember is a paid, protected module and the test world does not enable it, so its presence is
+ * simulated: `game.modules.get("ember")` reports it active for the duration, and Ember's two
+ * typefaces are loaded straight from its folder, which is all its global stylesheet would have
+ * contributed to our windows. Everything else — the class, the skin, the art — is the real code
+ * path. On a machine without Ember installed the suite reports that and skips, rather than
+ * failing on art that is not there.
+ *
+ * @param {{mode?: "windowed"|"fullscreen", keepOpen?: boolean}} [options]
+ *   `keepOpen` leaves both windows up so the runner can take a screenshot; call
+ *   `closeEmberFixture` afterwards.
+ */
+export async function emberSuite({ mode = "fullscreen", keepOpen = false } = {}) {
+  const report = new Report();
+  const tag = `[ember ${mode}]`;
+  const installed = await fetch("/modules/ember/module.json", { method: "HEAD" })
+    .then(r => r.ok).catch(() => false);
+  if ( !installed ) {
+    report.check(`${tag} skipped: Ember is not installed on this machine`, true);
+    return report.summary;
+  }
+
+  const api = game.modules.get(MODULE)?.api;
+  const originalGet = game.modules.get;
+  const restoreMode = game.settings.get(MODULE, "displayMode");
+  let trader = null;
+  let shop = null;
+  let manager = null;
+
+  const teardown = async () => {
+    await shop?.close().catch(() => {});
+    await manager?.close().catch(() => {});
+    game.modules.get = originalGet;
+    if ( trader ) await trader.delete().catch(() => {});
+    await game.settings.set(MODULE, "displayMode", restoreMode);
+  };
+
+  try {
+    // Without Ember the windows must not wear the skin — checked before the simulation starts.
+    const plain = await import(`/modules/${MODULE}/scripts/config.mjs`);
+    report.check(`${tag} without Ember the windows get no ember class`,
+      !plain.launchWindowOptions().classes.includes("sogrom-ember"));
+
+    game.modules.get = function(id) {
+      if ( id === "ember" ) return { id: "ember", active: true };
+      return originalGet.call(this, id);
+    };
+    for ( const [family, file] of [
+      ["Vollkorn", "Vollkorn/Vollkorn.ttf"], ["Pirate Scroll", "PirateScroll/PirateScroll.otf"]
+    ] ) {
+      if ( [...document.fonts].some(face => face.family.replaceAll('"', "") === family) ) continue;
+      const face = new FontFace(family, `url("/modules/ember/assets/fonts/${file}")`);
+      document.fonts.add(await face.load().catch(() => face));
+    }
+    await game.settings.set(MODULE, "displayMode", mode);
+
+    // Every borrowed file is really there, at the path the stylesheet uses.
+    for ( const asset of EMBER_ASSETS ) {
+      const ok = await fetch(`/modules/ember/${asset}`, { method: "HEAD" }).then(r => r.ok).catch(() => false);
+      report.check(`${tag} Ember still ships ${asset}`, ok);
+    }
+
+    trader = await api.createTrader({ name: `${PREFIX} Ember Trader`, greeting: "Warm yourself by the fire." });
+    await trader.update({ "system.currency": { pp: 0, gp: 120, ep: 0, sp: 0, cp: 0 } });
+    await trader.createEmbeddedDocuments("Item", [
+      { name: `${PREFIX} Ember Lantern`, type: "loot", img: "icons/sundries/lights/lantern-iron-yellow.webp",
+        system: { quantity: 3, price: { value: 5, denomination: "gp" }, rarity: "uncommon" },
+        flags: { [MODULE]: { unlimited: false, overrideCp: null, revealAt: null, baseQty: 3 } } },
+      { name: `${PREFIX} Ember Blade`, type: "weapon", img: "icons/weapons/swords/sword-guard-red.webp",
+        system: { quantity: 1, price: { value: 40, denomination: "gp" }, rarity: "rare" },
+        flags: { [MODULE]: { unlimited: false, overrideCp: null, revealAt: null, baseQty: 1 } } }
+    ]);
+
+    const character = game.actors.find(a => a.name === `${PREFIX} Vex`);
+    shop = await api.openShop(trader.id, { actor: character });
+    await settle();
+
+    const root = shop?.element;
+    if ( !report.check(`${tag} the shop renders`, !!root) ) return report.summary;
+    report.check(`${tag} the shop wears the ember class`, root.classList.contains("sogrom-ember"),
+      [...root.classList].join(" "));
+
+    const ground = mode === "fullscreen" ? root : root.querySelector(".window-content");
+    const groundImage = getComputedStyle(ground).backgroundImage;
+    report.check(`${tag} the window ground is Ember's codex paper`,
+      groundImage.includes("codex-background-dark"), groundImage);
+
+    const portrait = root.querySelector(".shop-party-img");
+    const ring = portrait ? getComputedStyle(portrait.parentElement, "::after").backgroundImage : "";
+    report.check(`${tag} the portraits wear Ember's ring`, ring.includes("BlockActorRing"), ring);
+    report.check(`${tag} and are clipped to a circle`,
+      !!portrait && getComputedStyle(portrait).borderRadius === "50%", getComputedStyle(portrait).borderRadius);
+    const rect = portrait?.getBoundingClientRect();
+    report.check(`${tag} and are still 300x300`,
+      Math.round(rect?.width) === 300 && Math.round(rect?.height) === 300,
+      `${Math.round(rect?.width)}x${Math.round(rect?.height)}`);
+
+    const heading = root.querySelector(".shop-party-name");
+    report.check(`${tag} headings use Ember's display face`,
+      getComputedStyle(heading).fontFamily.includes("Pirate Scroll"), getComputedStyle(heading).fontFamily);
+    report.check(`${tag} body text uses Vollkorn`,
+      getComputedStyle(root).fontFamily.includes("Vollkorn"), getComputedStyle(root).fontFamily);
+
+    // The windows stay usable, not just recoloured.
+    root.querySelector(".shop-panel--stock .shop-tile [data-action=\"stageLine\"]")?.click();
+    await settle();
+    report.check(`${tag} staging still works under the skin`, !!shop.element.querySelector(".shop-staged-row"));
+
+    if ( keepOpen ) {
+      emberFixture = { teardown };
+      return report.summary;
+    }
+
+    // The manager: same class, and the portrait picker ringed.
+    await shop.close();
+    shop = null;
+    manager = api.openManager();
+    await settle();
+    manager.element.querySelector(`[data-trader-id="${trader.id}"] [data-action="selectTrader"]`)?.click();
+    await settle();
+    report.check(`${tag} the manager wears the ember class`, manager.element.classList.contains("sogrom-ember"));
+    const picker = manager.element.querySelector(".shop-portrait");
+    report.check(`${tag} the manager's portrait wears Ember's ring`,
+      !!picker && getComputedStyle(picker, "::after").backgroundImage.includes("BlockActorRing"));
+    const overlap = railOverlap(manager.element);
+    report.check(`${tag} no two Traders in the rail overlap under Ember's wider type`, !overlap, overlap);
+  } catch ( err ) {
+    report.fail(`emberSuite (${mode}) threw`, err);
+  }
+
+  await teardown();
+  return report.summary;
+}
+
+/**
+ * The first pair of rail rows that overlap, described, or "" if none do. A row whose text
+ * outgrows Foundry's fixed button height spills over the row beneath it, which is exactly what
+ * Ember's wider typeface once did.
+ */
+function railOverlap(root) {
+  const rows = [...root.querySelectorAll(".shop-rail-row")].map(row => row.getBoundingClientRect());
+  for ( let i = 1; i < rows.length; i++ ) {
+    if ( rows[i].top < rows[i - 1].bottom - 0.5 ) {
+      return `row ${i} starts at ${Math.round(rows[i].top)} but row ${i - 1} ends at ${Math.round(rows[i - 1].bottom)}`;
+    }
+  }
+  return "";
+}
+
+/** Close what `emberSuite({keepOpen: true})` left up, and stop simulating Ember. */
+export async function closeEmberFixture() {
+  const fixture = emberFixture;
+  emberFixture = null;
+  await fixture?.teardown();
+  return true;
+}
+
+/** Open the manager on the Ember Trader for a screenshot. Pairs with `closeEmberFixture`. */
+export async function emberManagerFixture() {
+  const summary = await emberSuite({ mode: "fullscreen", keepOpen: true });
+  const { ShopApp } = await import(`/modules/${MODULE}/scripts/app/shop-app.mjs`);
+  for ( const app of ShopApp.instances ) await app.close();
+  const api = game.modules.get(MODULE).api;
+  const manager = api.openManager();
+  await settle();
+  const trader = game.actors.find(a => a.name === `${PREFIX} Ember Trader`);
+  manager.element.querySelector(`[data-trader-id="${trader?.id}"] [data-action="selectTrader"]`)?.click();
+  await settle();
+  const previous = emberFixture;
+  emberFixture = { teardown: async () => { await manager.close().catch(() => {}); await previous?.teardown(); } };
+  return summary;
+}
+
+/* -------------------------------------------- */
 
 /**
  * Pull the raw keys out of some markup, for a failure message.
@@ -592,7 +928,10 @@ export async function all() {
   const suites = {
     manager: managerSuite,
     shop: () => shopSuite("windowed"),
-    "shop-fullscreen": () => shopSuite("fullscreen")
+    "shop-fullscreen": () => shopSuite("fullscreen"),
+    "type-filter": typeFilterSuite,
+    "ember-fullscreen": () => emberSuite({ mode: "fullscreen" }),
+    "ember-windowed": () => emberSuite({ mode: "windowed" })
   };
   const out = {};
   for ( const [name, fn] of Object.entries(suites) ) {

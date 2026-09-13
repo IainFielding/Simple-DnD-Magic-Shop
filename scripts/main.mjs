@@ -97,6 +97,10 @@ function registerSettings() {
   game.settings.register(MODULE_ID, SETTINGS.traderFolder, {
     scope: "world", config: false, type: String, default: DEFAULTS.traderFolder
   });
+  // The GM's saved archetypes. Written from the Trader Manager's Identity pane, never by hand.
+  game.settings.register(MODULE_ID, SETTINGS.archetypes, {
+    scope: "world", config: false, type: Object, default: DEFAULTS.archetypes
+  });
 
   /* --- Pricing ----------------------------------------------------------- */
 

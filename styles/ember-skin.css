@@ -1,0 +1,217 @@
+/* Ember skin — applied when the Ember module is active.
+
+   The shop and the Trader Manager get the `sogrom-ember` class from launchWindowOptions()
+   (config.mjs) whenever Ember is enabled in the world, and this sheet re-themes both windows to
+   Ember's look: the dark codex-paper ground, parchment text over translucent near-black panels,
+   warm ember-red for the live accent, and Ember's own fonts (Pirate Scroll for headings,
+   Vollkorn for body text). It is the same skin, with the same values, that the Simple D&D
+   Character Creator wears under Ember, so the two sogrom windows still read as one product in
+   an Ember world.
+
+   Two rules of the road:
+   1. Everything here is scoped under `.sogrom-ember`, so without Ember the module renders its
+      stock Arcane Midnight theme untouched.
+   2. Assets are referenced from the Ember module's own directory — `../../ember/…` resolves to
+      `modules/ember/…`. That is deliberate: we never ship copies of Ember's art. The URLs are
+      only fetched while the `sogrom-ember` class is applied, i.e. while Ember is installed and
+      active, so a world without Ember never requests (or 404s on) these files. The fonts need
+      no @font-face here at all: Ember's stylesheet declares "Vollkorn" and "Pirate Scroll"
+      globally whenever it is active, which is exactly when this skin applies.
+
+   The theme works by re-pointing the `--shop-*` design tokens shop.css is built on; the rules
+   below the token block cover the few surfaces shop.css paints directly, plus Ember's art.
+
+   ---------------------------------------------- Ember asset manifest
+
+   Every file this sheet names in Ember's own directory, in one list. Ember is a protected module
+   we do not control: an art file renamed in one of its releases breaks a rule here silently (a
+   missing background paints nothing, a missing border-image falls back to the border colour).
+   The end-to-end harness fetches each of these, but only on a machine with Ember installed — so
+   add to this list, and to `EMBER_ASSETS` in test-e2e/in-world/render.mjs, whenever you add a
+   URL below.
+
+     ui/elements/codex-background-dark.webp      window ground, fullscreen + windowed
+     ui/elements/cosmos-design-weathered.webp    fullscreen watermark
+     ui/borders/BlockActorRing.webp              the portraits: both parties in the shop, and
+                                                 the Trader's portrait in the manager
+
+   The creator's skin also borrows Ember's heading rules, page texture and brand mark. None of
+   them have a home here: the shop has no prose pages and no brand mark, and its panel heads are
+   compact labels with a running total beside them, where a centred ornament would collide with
+   the figure. */
+
+/* ---------------------------------------------- Design tokens
+
+   Ember's palette (see ember/styles/variables.less) mapped onto the shop's semantic tokens:
+   near-black cool purples for surfaces, parchment lights for text, the warm ember red as the
+   interactive accent ("open"), and parchment gold — Ember's ridge borders — for "settled".
+   Values match the character creator's Ember skin exactly. */
+
+.sogrom-shop.sogrom-ember {
+  /* --- Surfaces ------------------------------------------------------
+     Ember lays *translucent* near-black panels over its paper texture rather than solid plates,
+     so the ground reads through everything. Following that is what makes the shop feel like part
+     of Ember's room rather than a lid over it. Nothing in the shop is a covering drawer, so
+     unlike the creator even the sunk bands can let the texture through. */
+  --shop-bg: rgba(11, 10, 19, 0.50);
+  --shop-sunk: rgba(7, 6, 13, 0.62);
+  --shop-panel: rgba(23, 19, 30, 0.72);
+  --shop-panel-2: rgba(33, 27, 41, 0.80);
+
+  /* Borders: --shop-line is decoration, --shop-line-2 bounds components and clears 3:1. */
+  --shop-line: #483d53;
+  --shop-line-2: #6c5c7d;
+
+  /* Text — Ember's parchment lights. */
+  --shop-text: #f5eadf;          /* light-2, Ember's primary text */
+  --shop-muted: #9f8475;         /* light-5, Ember's subtle text */
+  --shop-bright: #fffbf0;        /* light-1, Ember's emphatic text */
+  --shop-faint: #8a7366;         /* light-5 darkened to 4.5:1 on the sunk bands */
+
+  /* --- The two semantic halves ---------------------------------------
+     settled = Ember's ridge parchment; open = Ember's own --color-active.
+
+     The same caveat as the creator's skin: Ember's palette is warm throughout, so these two
+     separate mostly by saturation rather than by value. Colour is never the only cue in the shop
+     — a staged tile also carries a count, a refused one a reason, the confirm button a label —
+     and that redundancy is what keeps this skin usable. Do not remove those cues while it
+     exists. */
+  --shop-settled: #d0b8a3;       /* light-4 */
+  --shop-settled-bright: #f0dab9;/* light-3 */
+  --shop-settled-soft: rgba(208, 184, 163, 0.16);
+  --shop-settled-glow: rgba(208, 184, 163, 0.32);
+
+  --shop-open: #ff6b6b;
+  --shop-open-bright: #ff9a9a;
+  --shop-open-soft: rgba(255, 107, 107, 0.16);
+  --shop-open-glow: rgba(255, 107, 107, 0.35);
+
+  /* Refusals and unaffordable prices. Close in hue to the open red, which is why every use of it
+     in the shop is also worded ("Cannot afford", a refusal reason) rather than colour alone. */
+  --shop-danger: #eb4a58;
+
+  --shop-sheen: inset 0 1px 0 rgba(255, 251, 240, 0.05);
+  --shop-panel-grad: linear-gradient(180deg, rgba(29, 24, 38, 0.85), rgba(18, 14, 25, 0.85));
+  --shop-chrome-grad: linear-gradient(180deg, rgba(11, 10, 19, 0.55), rgba(11, 10, 19, 0.55));
+
+  /* --- Shape ---------------------------------------------------------
+     Arcane Midnight is square by decision; Ember is not — its options are 12px pills and its
+     crests are circles. The radius is a single token so this is one sweep. */
+  --shop-radius: 12px;
+  --shop-radius-pill: 999px;
+
+  --shop-font-heading: "Pirate Scroll", "Vollkorn", serif;
+  --shop-font-body: "Vollkorn", "Palatino Linotype", Georgia, serif;
+
+  /* Ember's warm-bronze scrollbars (scrollbar-color inherits down the tree). */
+  scrollbar-color: #85715c transparent;
+}
+
+/* ---------------------------------------------- Background
+
+   Ember's fullscreen look (ember/styles/applications.less): the dark codex-paper texture, a
+   faint warm glow rising from the bottom edge, and the cosmos watermark behind everything. */
+
+.sogrom-shop-fullscreen.sogrom-ember {
+  background: url("../../ember/ui/elements/codex-background-dark.webp") repeat center #0b0a13;
+}
+
+/* Replace the teal-and-brass ambience with Ember's bottom ember-glow. */
+.sogrom-shop-fullscreen.sogrom-ember::before {
+  background: linear-gradient(to bottom, transparent 75%, rgba(178, 50, 53, 0.15) 100%);
+}
+
+/* The cosmos watermark. shop.css leaves ::after free on the fullscreen root; it sits with the
+   ambience behind the content and never catches the pointer. */
+.sogrom-shop-fullscreen.sogrom-ember::after {
+  content: "";
+  position: absolute;
+  inset: 10% 0 0 0;
+  pointer-events: none;
+  z-index: -1;
+  background: url("../../ember/ui/elements/cosmos-design-weathered.webp") no-repeat center;
+  background-size: auto 100%;
+  opacity: 0.06;
+}
+
+/* Windowed mode wears the same texture inside Foundry's frame. */
+.sogrom-shop-windowed.sogrom-ember,
+.sogrom-shop-windowed.sogrom-ember .window-content {
+  background: url("../../ember/ui/elements/codex-background-dark.webp") repeat center #0b0a13;
+}
+.sogrom-shop-windowed.sogrom-ember .window-header {
+  background: linear-gradient(180deg, #17131e, #0b0a13);
+}
+
+/* ---------------------------------------------- Surfaces shop.css paints directly */
+
+/* The counter between the two panels is a fixed dark wash in shop.css; under Ember it follows
+   the same translucent plate as everything else. */
+.sogrom-ember .shop-panel--stage {
+  background: rgba(11, 10, 19, 0.45);
+}
+
+/* The primary action — Confirm Trade, Post to Chat — wears Ember's warm red gradient, as its
+   primary buttons do. The glow on hover already follows the open tokens above. */
+.sogrom-ember .shop-btn--primary {
+  background: linear-gradient(180deg, #e04e4e, #c93f4b);
+  border-color: #5e1722; /* warm-3 */
+  color: #fffbf0;
+}
+.sogrom-ember .shop-btn--primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #ea6060, #d34c57);
+  border-color: #ff9a9a;
+}
+
+/* Item tiles take a smaller corner than the 12px token. At 12px the rounding would crop the
+   corners off a 64px icon and thin the rarity border where it turns, and that border is the
+   tile's main cue. */
+.sogrom-ember .shop-tile-button {
+  border-radius: 6px;
+}
+
+/* Pirate Scroll is a display face with no bold weights — heavy tracking fights its hand-drawn
+   look, so relax it on headings and the uppercase labels that use the heading face. */
+.sogrom-ember :is(h1, h2, h3, h4) {
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+/* ---------------------------------------------- Ember's own art
+
+   --- The portrait ring --------------------------------------------
+   Ember rings actor portraits with this art. Ember applies it as a `border-image`, sliced at 36px
+   of a 109px ring — which only reads as a circle on portraits about that size. On the shop's
+   300px portraits the slice's straight edge sections stretch, and the ring comes out a rounded
+   square (it did; the screenshots showed it). So the whole image is laid over the portrait as a
+   single overlay instead, scaled uniformly: a true circle at any size, with the band thickening
+   in proportion exactly as the art was drawn.
+
+   The portrait itself is clipped to a circle underneath, and the ring overhangs its rim slightly
+   (`inset: -6px`) so no square corner of the picture can show outside the band. */
+.sogrom-ember .shop-party-img {
+  border: none;
+  border-radius: 50%;
+}
+.sogrom-ember .shop-party-portrait::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  pointer-events: none;
+  background: url("../../ember/ui/borders/BlockActorRing.webp") no-repeat center / 100% 100%;
+}
+
+/* The manager's portrait picker: the same ring, drawn inside the button — its `overflow: hidden`
+   and the circular radius already clip the picture — and above the camera hint. */
+.sogrom-ember .shop-portrait {
+  border: none;
+  border-radius: 50%;
+}
+.sogrom-ember .shop-portrait::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: url("../../ember/ui/borders/BlockActorRing.webp") no-repeat center / 100% 100%;
+}

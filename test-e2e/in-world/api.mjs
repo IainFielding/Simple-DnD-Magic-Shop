@@ -47,11 +47,13 @@ const SURFACE = {
   ],
   read: [
     "listTraders", "getTrader", "getTraderData", "getAttitude", "getSpend", "getStock",
-    "getShopContext", "gmAvailable"
+    "getLedger", "listArchetypes", "getShopContext", "gmAvailable"
   ],
   write: [
     "createTrader", "duplicateTrader", "deleteTrader", "addStock", "removeStock",
-    "setStockLine", "restock", "setAttitude", "adjustAttitude", "postTraderCard", "openManager"
+    "setStockLine", "restock", "clearLedger", "setAttitude", "adjustAttitude",
+    "applyArchetype", "saveArchetype", "deleteArchetype", "exportTrader", "importTrader",
+    "postTraderCard", "openManager"
   ],
   trading: ["openShop", "buy", "sell", "barter", "trade"]
 };
@@ -308,8 +310,113 @@ export async function hookSuite() {
 
 /* -------------------------------------------- */
 
+/**
+ * Archetypes and portable Traders, through the API a macro author would use.
+ *
+ * The round trip is the point: a Trader exported and imported must arrive with its stock and its
+ * settings, and without a single trace of this world's characters.
+ */
+export async function archetypeSuite() {
+  const report = new Report();
+  let trader = null;
+  let imported = null;
+  let savedId = null;
+  try {
+    const api = game.modules.get(MODULE)?.api;
+    trader = await api.createTrader({ name: `${PREFIX} Archetype Trader`, greeting: "Keep this." });
+
+    /* --- Built-in archetypes -------------------------------------------- */
+    const archetypes = api.listArchetypes();
+    report.check("the built-in archetypes are listed", archetypes.filter(a => a.builtIn).length >= 7,
+      archetypes.map(a => a.id).join(", "));
+
+    await api.applyArchetype(trader.id, "builtin-blacksmith");
+    const data = api.getTraderData(trader.id);
+    report.equal("applying one sets the buy filter", data.buyFilter.types, ["weapon", "equipment"]);
+    report.equal("and the restock rule", [data.restock.mode, data.restock.days], ["time", 7]);
+    report.equal("and leaves the greeting alone", data.greeting, "Keep this.");
+
+    let refused = false;
+    try {
+      await api.applyArchetype(trader.id, "no-such-archetype");
+    } catch {
+      refused = true;
+    }
+    report.check("an unknown archetype is refused", refused);
+
+    // Stocking from a recipe draws from whatever compendiums the world has, so the assertion is
+    // about consistency, not about a particular count.
+    const { stock } = await api.applyArchetype(trader.id, "builtin-general", { stock: true });
+    report.check("applying with stock reports what it did",
+      stock && Number.isFinite(stock.picked) && Array.isArray(stock.created), JSON.stringify(stock));
+    report.check("and stocks no more lines than it picked",
+      stock.created.length + stock.raised.length <= stock.picked,
+      `picked ${stock.picked}, created ${stock.created.length}, raised ${stock.raised.length}`);
+
+    /* --- Saved archetypes ----------------------------------------------- */
+    const saved = await api.saveArchetype(trader.id, {
+      name: `${PREFIX} Saved Shop`, recipe: { budget: { common: 2 }, categories: ["weapon"] }
+    });
+    savedId = saved.id;
+    report.check("a Trader can be saved as an archetype",
+      api.listArchetypes().some(a => a.id === saved.id && !a.builtIn));
+    report.equal("carrying its current settings", saved.buyFilter, api.getTraderData(trader.id).buyFilter);
+    report.equal("a built-in cannot be deleted", await api.deleteArchetype("builtin-fence"), false);
+    report.equal("a saved one can", await api.deleteArchetype(saved.id), true);
+    savedId = null;
+
+    /* --- Export and import ---------------------------------------------- */
+    const character = game.actors.find(a => a.name === `${PREFIX} Thog`);
+    if ( character ) await api.setAttitude(trader.id, character, 90);
+    await trader.update({ "system.currency": { pp: 1, gp: 25, ep: 0, sp: 0, cp: 0 } });
+    await trader.createEmbeddedDocuments("Item", [{
+      name: `${PREFIX} Exported Lantern`,
+      type: "loot",
+      system: { quantity: 3, price: { value: 5, denomination: "gp" } },
+      flags: { [MODULE]: { unlimited: false, overrideCp: 700, revealAt: 40, baseQty: 3 } }
+    }]);
+
+    const file = api.exportTrader(trader.id);
+    const text = JSON.stringify(file);
+    report.equal("an export identifies itself", file.format, `${MODULE}.trader`);
+    report.equal("and carries every stock line", file.items.length, trader.items.size);
+    report.check("but no opinion of anyone", !text.includes("\"attitude\":{") && !text.includes(character?.id ?? "\u0000"),
+      "an attitude map or a character id was exported");
+
+    imported = await api.importTrader(text);
+    report.check("an import creates a Trader", !!imported?.id && imported.id !== trader.id);
+    report.equal("with the same name", imported.name, trader.name);
+    report.equal("the same stock", imported.items.size, trader.items.size);
+    const lantern = imported.items.find(i => i.name.includes("Exported Lantern"));
+    report.equal("line settings intact", lantern?.flags?.[MODULE], {
+      unlimited: false, overrideCp: 700, revealAt: 40, baseQty: 3
+    });
+    report.equal("the same purse", imported.system.currency.gp, 25);
+    report.equal("the same buy filter", api.getTraderData(imported.id).buyFilter,
+      api.getTraderData(trader.id).buyFilter);
+    report.equal("and no memory of anyone", api.getTraderData(imported.id).attitude, {});
+    report.check("listed in the manager", api.listTraders().some(t => t.id === imported.id));
+
+    let named = "";
+    try {
+      await api.importTrader({ format: "something-else" });
+    } catch ( err ) {
+      named = err.message;
+    }
+    report.check("a file that is not an export is refused with a reason", !!named, named);
+  } catch ( err ) {
+    report.fail("archetypeSuite threw", err);
+  } finally {
+    const api = game.modules.get(MODULE)?.api;
+    if ( savedId ) await api?.deleteArchetype(savedId).catch(() => {});
+    if ( trader ) await trader.delete().catch(() => {});
+    if ( imported ) await imported.delete().catch(() => {});
+  }
+  return report.summary;
+}
+
 export async function all() {
-  const suites = { api: apiSuite, hooks: hookSuite };
+  const suites = { api: apiSuite, hooks: hookSuite, archetypes: archetypeSuite };
   const out = {};
   for ( const [name, fn] of Object.entries(suites) ) {
     try {

@@ -78,6 +78,13 @@
       {{/if}}
     </span>
 
+    {{#if payerName}}
+    <span class="sogrom-shop-receipt-payer">
+      <i class="fa-solid fa-people-group" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.receipt.paidFrom" name=payerName}}
+    </span>
+    {{/if}}
+
     {{#if attitudeGained}}
     {{!-- Only shown when goodwill actually moved: a line saying "+0 attitude" on every
           purchase would be noise, and this is the one thing a player most wants to see. --}}

@@ -11,6 +11,7 @@
  * a pre-release check rather than only by eye.
  */
 
+import { fileURLToPath } from "node:url";
 import { MODULE_ID, PLAYERS, WORLDS } from "./config.mjs";
 import { startFoundry } from "./lib/server.mjs";
 import { Session } from "./lib/session.mjs";
@@ -89,6 +90,27 @@ try {
   // expression or a renamed context field would otherwise reach a player unchallenged.
   const rendered = await gm.inWorld("render.mjs", "all");
   failed += report(rendered, only);
+
+  // A picture of each window under the Ember skin, for eyes. Nothing asserts on these — the
+  // ember suites above do the asserting — but "does it look like Ember" is a question only
+  // looking answers. Written next to this file and gitignored.
+  for ( const [shot, fixture, arg] of [
+    ["ember-shop-fullscreen.png", "emberSuite", { mode: "fullscreen", keepOpen: true }],
+    ["ember-shop-windowed.png", "emberSuite", { mode: "windowed", keepOpen: true }],
+    ["ember-manager.png", "emberManagerFixture", undefined]
+  ] ) {
+    await gm.inWorld("render.mjs", fixture, arg);
+    await gm.page.waitForTimeout(600);
+    // A screenshot that cannot be written — the PNG is open in an image viewer, which on Windows
+    // locks it — is a note, not a failure: the assertions have already run.
+    try {
+      await gm.page.screenshot({ path: fileURLToPath(new URL(shot, import.meta.url)) });
+    } catch ( err ) {
+      console.log(`  ..  could not write ${shot}: ${err.message.split("\n")[0]}`);
+    } finally {
+      await gm.inWorld("render.mjs", "closeEmberFixture");
+    }
+  }
 
   /* --- The one thing only a second client can show ------------------------- */
   failed += await crossClientChecks(gm, players);

@@ -1,5 +1,6 @@
-import { HOOKS, MODULE_ID, SETTINGS, DEFAULTS, fireHook, setting, t } from "../config.mjs";
+import { HOOKS, MODULE_ID, SETTINGS, DEFAULTS, fireHook, log, setting, t } from "../config.mjs";
 import { clearHistory, isTrader, newTraderData } from "./trader.mjs";
+import { parseTraderExport } from "./portable.mjs";
 
 /**
  * The Trader registry: which actors are Traders, and in what order the manager lists them.
@@ -172,6 +173,47 @@ export async function duplicateTrader(idOrUuid) {
   await appendToOrder(actor.id);
   fireHook(HOOKS.traderCreated, { trader: actor });
   return actor;
+}
+
+/**
+ * Create a Trader from an export file.
+ *
+ * The file is guarded by `data/portable.mjs#parseTraderExport` before anything is created, and a
+ * file it refuses creates nothing. The new Trader goes through the same creation data as one made
+ * with the New button, so an imported Trader is indistinguishable from a native one — with a clean
+ * history, since an export never carries one.
+ * @param {string|object} raw  The file's text, or the parsed object.
+ * @returns {Promise<{actor: object|null, error: string|null, items: number}>}
+ *   `error` is a key suffix under `error.import.`, for the caller to localise.
+ */
+export async function importTrader(raw) {
+  const parsed = parseTraderExport(raw);
+  if ( !parsed.ok ) return { actor: null, error: parsed.error, items: 0 };
+
+  const { trader, items } = parsed;
+  const folder = await traderFolder();
+  const data = newTraderData({
+    name: trader.name,
+    img: trader.img,
+    greeting: trader.greeting,
+    // Null means the file's Trader followed its world's default; follow this world's instead.
+    startingAttitude: trader.startingAttitude ?? undefined,
+    folder: folder?.id ?? null
+  });
+  Object.assign(data.flags[MODULE_ID], {
+    buyFilter: trader.buyFilter,
+    restock: { ...trader.restock, lastAt: 0 },
+    attitudeGain: trader.attitudeGain
+  });
+  data.system = { currency: trader.currency };
+  data.items = items;
+
+  const actor = await Actor.create(data);
+  if ( !actor ) return { actor: null, error: "failed", items: 0 };
+  await appendToOrder(actor.id);
+  log(`imported "${actor.name}" with ${actor.items.size} stock lines`);
+  fireHook(HOOKS.traderCreated, { trader: actor });
+  return { actor, error: null, items: actor.items.size };
 }
 
 /**

@@ -6,14 +6,19 @@ import {
   favour, formatCp, priceMultipliers, pricesFor, toCopper, validateAnchors
 } from "./data/pricing.mjs";
 import {
-  createTrader, deleteTrader, duplicateTrader, getTrader, listTraders
+  createTrader, deleteTrader, duplicateTrader, getTrader, importTrader, listTraders
 } from "./data/registry.mjs";
 import {
-  addStockItems, getAttitude, nudgeAttitude, restockTrader, setAttitude, spendFor, stockEntries,
-  stockLine, traderData
+  addStockItems, applyArchetype, clearLedger, getAttitude, ledgerOf, nudgeAttitude, restockTrader,
+  setAttitude, spendFor, stockEntries, stockFromRecipe, stockLine, traderData
 } from "./data/trader.mjs";
 import { sanitizeLine } from "./data/stock.mjs";
-import { buildShopContext } from "./trade/context.mjs";
+import {
+  archetypeFromTrader, deleteArchetype, getArchetype, listArchetypes, saveArchetype
+} from "./data/archetypes.mjs";
+import { entriesFor } from "./data/ledger.mjs";
+import { exportTrader } from "./data/portable.mjs";
+import { buildShopContext, resolvePayer } from "./trade/context.mjs";
 import { QUERIES, askGM, gmAvailable } from "./trade/queries.mjs";
 import { ShopApp } from "./app/shop-app.mjs";
 import { TraderManagerApp } from "./app/manager-app.mjs";
@@ -224,6 +229,29 @@ export function buildApi() {
     },
 
     /**
+     * A Trader's ledger, newest first. GM-only: it is every character's dealings.
+     * @param {string} traderId
+     * @param {{actor?: object|string, limit?: number}} [options]  Narrow to one character.
+     * @returns {object[]}  Ledger entries, as `data/ledger.mjs` documents them.
+     */
+    getLedger(traderId, { actor, limit } = {}) {
+      requireGM("getLedger");
+      const ledger = ledgerOf(traderOrThrow(traderId));
+      const max = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Math.floor(Number(limit)) : Infinity;
+      if ( actor ) return entriesFor(ledger, characterOrThrow(actor).id, max);
+      return ledger.slice(0, max);
+    },
+
+    /**
+     * Every archetype, built-in then saved. GM-only, like the manager it serves.
+     * @returns {object[]}
+     */
+    listArchetypes() {
+      requireGM("listArchetypes");
+      return listArchetypes();
+    },
+
+    /**
      * A Trader's stock, with each line's shop settings. GM-only and unfiltered — this is the
      * GM's own view, including lines gated behind an attitude threshold.
      * @param {string} traderId
@@ -246,14 +274,17 @@ export function buildApi() {
      * @param {object|string} [actor]
      * @returns {Promise<object>}
      */
-    async getShopContext(traderId, actor) {
+    async getShopContext(traderId, actor, { payer } = {}) {
+      const character = characterOrThrow(actor);
+      const payerId = idOf(payer);
       if ( game.user.isGM ) {
-        return buildShopContext(traderOrThrow(traderId), characterOrThrow(actor));
+        const trader = traderOrThrow(traderId);
+        return buildShopContext(trader, character, {
+          payer: resolvePayer({ actor: character, payerId }, game.user),
+          user: game.user
+        });
       }
-      return askGM(QUERIES.context, {
-        traderId,
-        actorId: characterOrThrow(actor).id
-      });
+      return askGM(QUERIES.context, { traderId, actorId: character.id, payerId });
     },
 
     /** Whether a GM is available to answer — i.e. whether a shop can be opened at all. */
@@ -340,6 +371,82 @@ export function buildApi() {
       return restockTrader(traderOrThrow(traderId));
     },
 
+    /** Empty a Trader's ledger. Receipts already posted to chat are untouched. */
+    async clearLedger(traderId) {
+      requireGM("clearLedger");
+      await clearLedger(traderOrThrow(traderId));
+      return true;
+    },
+
+    /**
+     * Give a Trader an archetype's buy filter, restock rule and starting attitude — and, with
+     * `stock: true`, fill its shelves from the archetype's recipe too.
+     * @param {string} traderId
+     * @param {string} archetypeId
+     * @param {{stock?: boolean}} [options]
+     * @returns {Promise<{archetype: object, stock: object|null}>}
+     */
+    async applyArchetype(traderId, archetypeId, { stock = false } = {}) {
+      requireGM("applyArchetype");
+      const trader = traderOrThrow(traderId);
+      const archetype = getArchetype(archetypeId);
+      if ( !archetype ) throw new Error(t("error.noArchetype"));
+      await applyArchetype(trader, archetype);
+      return { archetype, stock: stock ? await stockFromRecipe(trader, archetype.recipe) : null };
+    },
+
+    /**
+     * Save a Trader's setup as an archetype.
+     * @param {string} traderId
+     * @param {{name: string, recipe?: object}} options  `recipe` is the stock recipe to record;
+     *   without one the archetype stocks nothing when applied with stock.
+     * @returns {Promise<object>}  The saved archetype.
+     */
+    async saveArchetype(traderId, { name, recipe } = {}) {
+      requireGM("saveArchetype");
+      const trader = traderOrThrow(traderId);
+      return saveArchetype(archetypeFromTrader({
+        id: foundry.utils.randomID(),
+        name: name ?? trader.name,
+        data: traderData(trader),
+        recipe
+      }));
+    },
+
+    /** Delete a saved archetype. Built-ins cannot be deleted; asking returns false. */
+    async deleteArchetype(archetypeId) {
+      requireGM("deleteArchetype");
+      return deleteArchetype(archetypeId);
+    },
+
+    /**
+     * A Trader as export data — the object the manager downloads. Stock travels whole; attitudes,
+     * spend and the ledger never do.
+     * @param {string} traderId
+     * @returns {object}
+     */
+    exportTrader(traderId) {
+      requireGM("exportTrader");
+      const trader = traderOrThrow(traderId);
+      return exportTrader(trader.toObject(), {
+        moduleVersion: game.modules.get(MODULE_ID)?.version ?? "",
+        exportedAt: new Date().toISOString()
+      });
+    },
+
+    /**
+     * Create a Trader from export data, as an object or the file's text.
+     * @param {object|string} data
+     * @returns {Promise<object>}  The new Trader.
+     * @throws {Error}  Naming what is wrong with the file.
+     */
+    async importTrader(data) {
+      requireGM("importTrader");
+      const { actor, error } = await importTrader(data);
+      if ( error ) throw new Error(t(`error.import.${error}`));
+      return actor;
+    },
+
     /**
      * Set a Trader's attitude toward a character.
      * @returns {Promise<{from: number, to: number, changed: boolean, vetoed: boolean}>}
@@ -374,7 +481,8 @@ export function buildApi() {
     /**
      * Open a shop window.
      * @param {string} traderId
-     * @param {{actor?: object|string}} [options]
+     * @param {{actor?: object|string, payer?: object|string}} [options]  `payer` is a Group to pay
+     *   from; the character's own purse when omitted.
      * @returns {Promise<object|null>}  The ShopApp, or null if it could not open.
      */
     async openShop(traderId, options = {}) {
@@ -392,13 +500,13 @@ export function buildApi() {
      * @param {{id: string, qty: number}[]} params.lines
      * @returns {Promise<object>}  The settlement result.
      */
-    async buy({ traderId, actor, lines } = {}) {
-      return api.trade({ traderId, actor, mode: "trade", buy: lines, sell: [] });
+    async buy({ traderId, actor, payer, lines } = {}) {
+      return api.trade({ traderId, actor, payer, mode: "trade", buy: lines, sell: [] });
     },
 
     /** Sell to a Trader. Same path, same validation. */
-    async sell({ traderId, actor, lines } = {}) {
-      return api.trade({ traderId, actor, mode: "trade", buy: [], sell: lines });
+    async sell({ traderId, actor, payer, lines } = {}) {
+      return api.trade({ traderId, actor, payer, mode: "trade", buy: [], sell: lines });
     },
 
     /**
@@ -411,9 +519,9 @@ export function buildApi() {
      * @param {number} [params.goldCp]
      * @returns {Promise<object>}
      */
-    async barter({ traderId, actor, take, give, goldCp = 0 } = {}) {
+    async barter({ traderId, actor, payer, take, give, goldCp = 0 } = {}) {
       return api.trade({
-        traderId, actor, mode: "barter", buy: take, sell: give, goldCp
+        traderId, actor, payer, mode: "barter", buy: take, sell: give, goldCp
       });
     },
 
@@ -426,11 +534,13 @@ export function buildApi() {
      * @param {object} intent
      * @returns {Promise<object>}
      */
-    async trade({ traderId, actor, mode = "trade", buy = [], sell = [], goldCp = 0 } = {}) {
+    async trade({ traderId, actor, payer, mode = "trade", buy = [], sell = [], goldCp = 0 } = {}) {
       const character = characterOrThrow(actor);
       return askGM(QUERIES.trade, {
         traderId,
         actorId: character.id,
+        // A Group to pay from. Only an id crosses the wire; the GM decides whether it may be used.
+        payerId: idOf(payer),
         mode,
         buy: normaliseLines(buy),
         sell: normaliseLines(sell),
@@ -440,6 +550,17 @@ export function buildApi() {
   };
 
   return Object.freeze(api);
+}
+
+/**
+ * An actor's id from a document, an id or a uuid, or undefined for nothing — the shape every
+ * `payerId` takes on the wire.
+ * @param {object|string} [actor]
+ * @returns {string|undefined}
+ */
+function idOf(actor) {
+  if ( !actor ) return undefined;
+  return typeof actor === "string" ? actor : actor.id;
 }
 
 /**
