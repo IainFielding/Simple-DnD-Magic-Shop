@@ -86,7 +86,12 @@ export function filterPool(pool, { packs = [], maxValueCp = 0, minValueCp = 0, c
 export function categoryTokens(entry) {
   const type = entry?.type ?? "";
   const subtype = entry?.subtype ?? "";
-  return subtype ? [type, `${type}:${subtype}`] : [type];
+  // A magic item the shop will build from a template (see `data/enchant.mjs`) has no subtype of
+  // its own yet: "Weapon +1" becomes a longsword or a dagger when it is made. It answers to every
+  // subtype it could become, so a recipe asking for heavy armour can still draw "Armor +1".
+  const subtypes = Array.isArray(entry?.subtypes) ? entry.subtypes : [];
+  const all = [...new Set([subtype, ...subtypes].filter(Boolean))];
+  return [type, ...all.map(sub => `${type}:${sub}`)];
 }
 
 /**

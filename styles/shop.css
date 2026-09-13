@@ -1949,3 +1949,62 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   font-family: var(--shop-font-heading);
   color: var(--shop-bright);
 }
+
+/* ---------------------------------------------- Item state, price breakdown, haggling */
+
+/* Equipped and attuned, top right of a pack tile: clear of the staged badge (top left) and the
+   count (bottom right). The same glyphs dnd5e's inventory uses. */
+.sogrom-shop .shop-tile-status {
+  position: absolute;
+  right: -1px;
+  top: -1px;
+  display: flex;
+  gap: 0.1rem;
+  padding: 0 0.2rem;
+  font-size: 0.6rem;
+  line-height: 1.35;
+  color: var(--shop-open-bright);
+  background: rgba(13, 14, 17, 0.92);
+  border: 1px solid var(--shop-line-2);
+}
+
+/* "Unequipped when sold", under a staged row's price. Muted: it is information, not a warning. */
+.sogrom-shop .shop-staged-status {
+  font-size: 0.64rem;
+  line-height: 1.2;
+  color: var(--shop-muted);
+}
+.sogrom-shop .shop-staged-status i { margin-right: 0.2rem; color: var(--shop-open); }
+
+/* The rate line and a staged price both carry a breakdown on hover; say so with the cursor. */
+.sogrom-shop .shop-rate[data-tooltip],
+.sogrom-shop .shop-staged-line[data-tooltip] { cursor: help; }
+.sogrom-shop .shop-rate[data-tooltip] { text-decoration: underline dotted var(--shop-line-2); text-underline-offset: 3px; }
+.sogrom-shop .shop-rate:focus-visible { outline: 2px solid var(--shop-open); outline-offset: 2px; }
+
+.sogrom-shop .shop-haggle { white-space: nowrap; }
+
+/* The haggle chooser is a Foundry dialog, outside the shop's own root, so it is styled by the
+   class the shop gives it rather than under `.sogrom-shop`. */
+.sogrom-shop-dialog .shop-haggle-terms { margin: 0.25rem 0; }
+.sogrom-shop-dialog .shop-haggle-edge { margin: 0.25rem 0; font-style: italic; }
+.sogrom-shop-dialog .shop-haggle-skills {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+}
+.sogrom-shop-dialog .shop-haggle-skill {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+.sogrom-shop-dialog .shop-haggle-skill.is-locked { opacity: 0.55; }
+.sogrom-shop-dialog .shop-haggle-mod { font-variant-numeric: tabular-nums; }
+.sogrom-shop-dialog .shop-haggle-lock { font-size: 0.8em; font-style: italic; }
+
+/* The GM's enchantment chooser, likewise a Foundry dialog. */
+.sogrom-shop-dialog .shop-enchant-fields { display: flex; flex-direction: column; gap: 0.5rem; }
+.sogrom-shop-dialog .shop-enchant-fields label { display: flex; flex-direction: column; gap: 0.2rem; }
+.sogrom-shop-dialog .shop-enchant-price { margin: 0.25rem 0 0; font-variant-numeric: tabular-nums; }

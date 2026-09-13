@@ -2,8 +2,12 @@ import {
   HOOKS, MODULE_ID, PHYSICAL_TYPES, SETTINGS, fireCancellableHook, fireHook, log, setting
 } from "../config.mjs";
 import { clampAttitude, emptySpend, recordSpend, sanitizeSpend, adjustAttitude } from "./attitude.mjs";
+import { lockHaggle, sanitizeHaggleRecord } from "./haggle.mjs";
 import { defaultRestock, dueForRestock, restockPlan, sanitizeRestock } from "./restock.mjs";
-import { defaultBuyFilter, defaultLine, sanitizeBuyFilter, sanitizeLine } from "./stock.mjs";
+import { defaultBuyFilter, defaultLine, sanitizeBuyFilter, sanitizeLine, transferData } from "./stock.mjs";
+import {
+  expandPool, isHollowTemplate, madeIdentity, makeRandomEnchantedData, makeScrollData, materialise
+} from "./enchant.mjs";
 import { serialised } from "./serial.mjs";
 import { appendEntry, sanitizeLedger } from "./ledger.mjs";
 import { archetypeUpdate, sanitizeRecipe } from "./archetypes.mjs";
@@ -67,6 +71,7 @@ export function traderData(actor) {
       : clampAttitude(setting(SETTINGS.startingAttitude)),
     attitude: raw.attitude && typeof raw.attitude === "object" ? raw.attitude : {},
     spend: raw.spend && typeof raw.spend === "object" ? raw.spend : {},
+    haggle: raw.haggle && typeof raw.haggle === "object" ? raw.haggle : {},
     attitudeGain: sanitizeGain(raw.attitudeGain),
     buyFilter: sanitizeBuyFilter(raw.buyFilter),
     restock: sanitizeRestock(raw.restock)
@@ -208,6 +213,31 @@ export function spendFor(actor, character) {
 }
 
 /**
+ * Which haggling approaches a character has failed with this Trader, and on which in-game day.
+ * @param {object} actor
+ * @param {object|string} character
+ * @returns {Record<string, number>}
+ */
+export function haggleRecordFor(actor, character) {
+  return sanitizeHaggleRecord(traderData(actor).haggle[characterId(character)]);
+}
+
+/**
+ * Lock one haggling skill for a character until the next in-game day.
+ * @param {object} actor
+ * @param {object|string} character
+ * @param {string} skill
+ * @returns {Promise<void>}
+ */
+export async function recordHaggleFailure(actor, character, skill) {
+  const id = characterId(character);
+  const next = lockHaggle(haggleRecordFor(actor, character), skill, game.time.worldTime);
+  // Written whole rather than merged, so yesterday's locks are dropped rather than accumulating.
+  await actor.update({ [`flags.${MODULE_ID}.haggle.-=${id}`]: null });
+  await actor.setFlag(MODULE_ID, `haggle.${id}`, next);
+}
+
+/**
  * Accept either an actor or a bare id everywhere a character is named.
  *
  * The authoritative path has the document; the manager's attitude table often has only the id;
@@ -239,14 +269,27 @@ export function stockLine(item) {
  * Sorted by name in the player's locale, because the panels render in this order and an
  * unsorted shelf reads as random. Items the module has no line for still appear — an item
  * dropped straight onto the actor sheet is stock too, just stock with default settings.
+ *
+ * Only physical goods count. dnd5e adds a hidden, cached copy of a spell to any actor holding a
+ * scroll of it (flagged `dnd5e.cachedFor`) so the scroll can be cast; that copy is the system's
+ * bookkeeping, not something on the shelf.
  * @param {object} actor
  * @returns {{id: string, item: object, line: object}[]}
  */
 export function stockEntries(actor) {
-  const items = actor?.items?.contents ?? [];
+  const items = (actor?.items?.contents ?? []).filter(isStockItem);
   return items
     .map(item => ({ id: item.id, item, line: stockLine(item) }))
     .sort((a, b) => a.item.name.localeCompare(b.item.name, game.i18n.lang));
+}
+
+/**
+ * Whether an embedded item is a stock line: physical gear, and not a spell dnd5e cached for a scroll.
+ * @param {object} item
+ * @returns {boolean}
+ */
+export function isStockItem(item) {
+  return PHYSICAL_TYPES.includes(item?.type) && !item?.flags?.dnd5e?.cachedFor;
 }
 
 /**
@@ -292,42 +335,29 @@ export function stockLineUpdate(itemId, patch) {
  * @param {object} [options]
  * @param {number} [options.qty]    Stock count for each new line.
  * @param {object} [options.line]   Line settings for each new line.
+ * @param {boolean} [options.synthesize]  Make DMG templates into real items and spells into scrolls,
+ *                                  at random. The manager passes false once the GM has chosen.
+ * @param {() => number} [options.rng]
  * @returns {Promise<{created: object[], raised: object[], failed: string[], rejected: object[]}>}
  */
-export async function addStockItems(actor, uuids, { qty = 1, line = {} } = {}) {
-  const created = [];
-  const raised = [];
+export async function addStockItems(actor, uuids, { qty = 1, line = {}, synthesize = true, rng = Math.random } = {}) {
+  const sources = [];
   const failed = [];
   const rejected = [];
-
-  // Accumulated rather than appended, because one batch can name the same item more than once —
-  // a generator drawing from overlapping packs, or a roll table with a repeated entry. Two
-  // update entries for one `_id` is not a valid `updateEmbeddedDocuments` payload, and two
-  // create entries would make two rows where the GM wanted one row of two.
-  const raiseBy = new Map();      // existing item id -> how much to add
-  const newRows = new Map();      // identity key -> the creation data being accumulated
-
-  // Existing stock indexed twice, because there are two ways to recognise "the same thing".
-  //
-  // `compendiumSource` is the reliable one and covers the common path: a GM dragging the same
-  // compendium item in again, or the generator picking it twice. But an item that never came
-  // from a compendium — hand-made on the sheet, or copied off another actor — has no source at
-  // all, and keying only on that made every such add a fresh row.
-  //
-  // So name-and-type is the fallback. It is deliberately *only* a fallback: two genuinely
-  // different items can share a name, and for compendium items the uuid settles it properly.
-  const bySource = new Map();
-  const byIdentity = new Map();
-  for ( const item of actor.items ) {
-    const source = item._stats?.compendiumSource;
-    if ( source ) bySource.set(source, item);
-    byIdentity.set(`${item.type}:${item.name}`, item);
-  }
 
   for ( const uuid of uuids ?? [] ) {
     const item = await fromUuid(uuid).catch(() => null);
     if ( !item ) {
       failed.push(uuid);
+      continue;
+    }
+
+    // A spell on a shop's shelf is a scroll of it — which is what a treasure table that rolls spells
+    // means, and what dnd5e itself does when a spell is dropped into an inventory.
+    if ( synthesize && item.type === "spell" ) {
+      const data = await makeScrollData(item);
+      if ( data ) sources.push({ data });
+      else rejected.push({ uuid, name: item.name, type: item.type });
       continue;
     }
 
@@ -338,10 +368,89 @@ export async function addStockItems(actor, uuids, { qty = 1, line = {} } = {}) {
       continue;
     }
 
-    const identity = `${item.type}:${item.name}`;
-    const existing = bySource.get(uuid)
-      ?? bySource.get(item._stats?.compendiumSource)
-      ?? byIdentity.get(identity);
+    // A DMG template ("Weapon, +1, +2, or +3") is made into a real item at random when nobody is
+    // there to choose. The manager asks the GM instead, through `addMadeStock`. A template with no
+    // base the system can put it on is stocked as it is, which is no worse than before.
+    if ( synthesize && isHollowTemplate(item) ) {
+      const data = await makeRandomEnchantedData(item, { rng });
+      if ( data ) {
+        sources.push({ data });
+        continue;
+      }
+    }
+
+    sources.push({ item, uuid });
+  }
+
+  const result = await addStockData(actor, sources, { qty, line });
+  return { ...result, failed: [...failed, ...result.failed], rejected };
+}
+
+/**
+ * Add finished item data to a Trader's stock — an enchanted item or a scroll the GM chose, or what
+ * the generator made.
+ * @param {object} actor
+ * @param {object[]} data       Creation data, as `data/enchant.mjs` builds it.
+ * @param {object} [options]    As {@link addStockItems}.
+ * @returns {Promise<{created: object[], raised: object[], failed: string[]}>}
+ */
+export function addMadeStock(actor, data, options = {}) {
+  return addStockData(actor, (data ?? []).filter(Boolean).map(d => ({ data: d })), options);
+}
+
+/**
+ * The shared end of every route into stock: merge what is already on the shelf, create the rest.
+ *
+ * Takes either a resolved item and its uuid, or ready-made creation data. Made items are recognised
+ * by what they were made from (`data/enchant.mjs#madeIdentity`) rather than by name — a Longsword +1
+ * and a Flame Tongue Longsword share a base item and would otherwise merge.
+ * @param {object} actor
+ * @param {({item: object, uuid: string}|{data: object})[]} sources
+ * @param {object} [options]
+ * @param {number} [options.qty]
+ * @param {object} [options.line]
+ * @returns {Promise<{created: object[], raised: object[], failed: string[]}>}
+ */
+async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
+  const created = [];
+  const raised = [];
+
+  // Accumulated rather than appended, because one batch can name the same item more than once —
+  // a generator drawing from overlapping packs, or a roll table with a repeated entry. Two
+  // update entries for one `_id` is not a valid `updateEmbeddedDocuments` payload, and two
+  // create entries would make two rows where the GM wanted one row of two.
+  const raiseBy = new Map();      // existing item id -> how much to add
+  const newRows = new Map();      // identity key -> the creation data being accumulated
+
+  // Existing stock indexed three ways, because there are three ways to recognise "the same thing".
+  //
+  // What a made item was made from is exact. `compendiumSource` is the reliable one for everything
+  // else: a GM dragging the same compendium item in again, or the generator picking it twice. But
+  // an item that never came from a compendium — hand-made on the sheet, or copied off another
+  // actor — has no source at all, and keying only on that made every such add a fresh row.
+  //
+  // So name-and-type is the fallback. It is deliberately *only* a fallback: two genuinely
+  // different items can share a name, and for compendium items the uuid settles it properly.
+  const byMade = new Map();
+  const bySource = new Map();
+  const byIdentity = new Map();
+  for ( const item of actor.items ) {
+    const made = madeIdentity(item.flags?.[MODULE_ID]?.madeFrom);
+    if ( made ) {
+      byMade.set(made, item);
+      continue;
+    }
+    const source = item._stats?.compendiumSource;
+    if ( source ) bySource.set(source, item);
+    byIdentity.set(`${item.type}:${item.name}`, item);
+  }
+
+  for ( const entry of sources ) {
+    const made = entry.data ? madeIdentity(entry.data.flags?.[MODULE_ID]?.madeFrom) : "";
+    const identity = made || `${entry.item.type}:${entry.item.name}`;
+    const existing = made
+      ? byMade.get(made)
+      : bySource.get(entry.uuid) ?? bySource.get(entry.item._stats?.compendiumSource) ?? byIdentity.get(identity);
 
     if ( existing ) {
       // An unlimited line cannot be "raised" — there is nothing to add to — but it still counts
@@ -361,14 +470,21 @@ export async function addStockItems(actor, uuids, { qty = 1, line = {} } = {}) {
       continue;
     }
 
-    const source = item.toObject();
+    const source = entry.data ? structuredClone(entry.data) : entry.item.toObject();
     delete source._id;
     // Stock counts are the Trader's business, not the source item's: a compendium entry that
-    // happens to say "quantity 20" must not silently stock twenty.
-    source.system = { ...source.system, quantity: qty };
-    source.flags = { ...source.flags, [MODULE_ID]: sanitizeLine({ ...line, baseQty: qty }) };
-    source._stats = { ...source._stats, compendiumSource: originUuid(item, uuid) };
-    newRows.set(identity, source);
+    // happens to say "quantity 20" must not silently stock twenty. And a Trader's copy is never
+    // equipped or attuned, whatever the item it was copied from was.
+    const clean = transferData(source, qty);
+    const madeFrom = source.flags?.[MODULE_ID]?.madeFrom;
+    clean.flags = {
+      ...clean.flags,
+      [MODULE_ID]: { ...sanitizeLine({ ...line, baseQty: qty }), ...(madeFrom ? { madeFrom } : {}) }
+    };
+    if ( entry.item ) {
+      clean._stats = { ...clean._stats, compendiumSource: originUuid(entry.item, entry.uuid) };
+    }
+    newRows.set(identity, clean);
   }
 
   const toUpdate = [...raiseBy].map(([id, add]) => ({
@@ -376,13 +492,17 @@ export async function addStockItems(actor, uuids, { qty = 1, line = {} } = {}) {
     "system.quantity": (Number(actor.items.get(id)?.system?.quantity) || 0) + add
   }));
   if ( toUpdate.length ) await actor.updateEmbeddedDocuments("Item", toUpdate);
+  const failed = [];
   if ( newRows.size ) {
-    created.push(...await actor.createEmbeddedDocuments("Item", [...newRows.values()]));
+    const rows = [...newRows.values()];
+    const made = await actor.createEmbeddedDocuments("Item", rows);
+    created.push(...made);
+    // A `preCreateItem` listener can quietly refuse a row; say so rather than report it stocked.
+    if ( made.length < rows.length ) failed.push(...rows.slice(made.length).map(r => r.name));
   }
 
-  logTrader(actor, `stock added: ${created.length} new, ${raised.length} raised, `
-    + `${rejected.length} not stockable, ${failed.length} unresolved`);
-  return { created, raised, failed, rejected };
+  logTrader(actor, `stock added: ${created.length} new, ${raised.length} raised, ${failed.length} refused`);
+  return { created, raised, failed };
 }
 
 /**
@@ -503,6 +623,7 @@ export function newTraderData({ name, img, greeting = "", startingAttitude, fold
         ),
         attitude: {},
         spend: {},
+        haggle: {},
         attitudeGain: null,
         buyFilter: defaultBuyFilter(),
         restock: defaultRestock(),
@@ -525,7 +646,7 @@ export function clearHistory(data) {
   const flags = data.flags?.[MODULE_ID] ?? {};
   return {
     ...data,
-    flags: { ...data.flags, [MODULE_ID]: { ...flags, attitude: {}, spend: {}, ledger: [] } }
+    flags: { ...data.flags, [MODULE_ID]: { ...flags, attitude: {}, spend: {}, haggle: {}, ledger: [] } }
   };
 }
 
@@ -610,14 +731,38 @@ export async function stockFromRecipe(actor, recipe, { rng = Math.random } = {})
   const empty = { picked: 0, shortfalls: {}, created: [], raised: [], failed: [], rejected: [] };
   if ( budgetTotal(r.budget) <= 0 ) return empty;
 
-  const pool = filterPool(await itemPool(), {
+  const pool = filterPool(await stockPool(), {
     packs: r.packs, categories: r.categories, maxValueCp: r.maxValueCp
   });
   const { picked, shortfalls } = pickByBudget({ pool, budget: r.budget, rng });
   if ( !picked.length ) return { ...empty, shortfalls };
 
-  const result = await addStockItems(actor, picked.map(entry => entry.uuid));
-  return { picked: picked.length, shortfalls, ...result };
+  // Templates and scrolls in the pick become finished items here, within the recipe's kinds and
+  // ceiling; everything else is stocked from its compendium entry as before.
+  const { uuids, data, failed: unmade } = await materialise(picked, {
+    categories: r.categories, maxValueCp: r.maxValueCp, rng
+  });
+  const plain = await addStockItems(actor, uuids, { synthesize: false });
+  const made = await addMadeStock(actor, data);
+  return {
+    picked: picked.length,
+    shortfalls,
+    created: [...plain.created, ...made.created],
+    raised: [...plain.raised, ...made.raised],
+    failed: [...plain.failed, ...made.failed, ...unmade],
+    rejected: plain.rejected
+  };
+}
+
+/**
+ * The generator's pool: every stockable item the world can see, with DMG templates and blank
+ * scrolls replaced by what can really be made from them. Built on the cached compendium pool.
+ * @param {object} [options]
+ * @param {boolean} [options.refresh]
+ * @returns {Promise<object[]>}
+ */
+export async function stockPool({ refresh = false } = {}) {
+  return expandPool(await itemPool({ refresh }));
 }
 
 /* -------------------------------------------- */

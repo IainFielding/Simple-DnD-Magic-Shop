@@ -294,6 +294,7 @@ export async function shopSuite(mode = "windowed") {
   let trader = null;
   let app = null;
   let restore = null;
+  let cloak = null;
 
   try {
     // Set before the window is constructed: the shell reads the setting in its constructor, so
@@ -322,6 +323,16 @@ export async function shopSuite(mode = "windowed") {
 
     const character = game.actors.find(a => a.name === `${PREFIX} Thog`);
     if ( !report.check("a shopper exists", !!character) ) return report.summary;
+
+    // Something the shopper is wearing and attuned to, so the pack can be seen to say so.
+    [cloak] = await character.createEmbeddedDocuments("Item", [{
+      name: `${PREFIX} Worn Cloak`,
+      type: "equipment",
+      system: {
+        quantity: 1, price: { value: 40, denomination: "gp" }, equipped: true,
+        attunement: "required", attuned: true, properties: ["mgc"], rarity: "uncommon", type: { value: "clothing" }
+      }
+    }]);
 
     app = await api.openShop(trader.id, { actor: character });
     await settle();
@@ -594,12 +605,34 @@ export async function shopSuite(mode = "windowed") {
         `box reads ${box?.value}, was ${coinValue}`);
     }
 
+    /* --- Item state, price breakdown and haggling ------------------------ */
+    const cloakTile = [...app.element.querySelectorAll(".shop-panel--pack .shop-tile")]
+      .find(tile => tile.dataset.name?.includes("Worn Cloak"));
+    if ( report.check("the worn cloak is in the pack", !!cloakTile) ) {
+      report.check("its tile shows it is equipped", !!cloakTile.querySelector(".shop-tile-status .fa-shield-halved"));
+      report.check("and attuned", !!cloakTile.querySelector(".shop-tile-status .fa-sun"));
+      const label = cloakTile.querySelector("[data-action=stageLine]")?.getAttribute("aria-label") ?? "";
+      report.check("and says so in words, not only icons", /Equipped/.test(label) && /Attuned/.test(label), label);
+
+      cloakTile.querySelector("[data-action=stageLine]")?.click();
+      await settle();
+      const row = app.element.querySelector('.shop-staged-row[data-side="give"]');
+      report.check("staging it warns the state will not go with it", !!row?.querySelector(".shop-staged-status"),
+        row?.outerHTML?.slice(0, 200));
+      report.check("and its price explains itself on hover",
+        (row?.querySelector(".shop-staged-line")?.dataset.tooltip ?? "").includes("<table"));
+    }
+    report.check("the rate line carries the price breakdown",
+      (app.element.querySelector(".shop-rate")?.dataset.tooltip ?? "").includes("<table"));
+    report.check("there is a Haggle button", !!app.element.querySelector('[data-action="haggle"]'));
+
     report.check("and still leaks no raw keys",
       !app.element.textContent.includes(MODULE), rawKeys(app.element));
   } catch ( err ) {
     report.fail(`shopSuite (${mode}) threw`, err);
   } finally {
     await app?.close().catch(() => {});
+    if ( cloak ) await cloak.delete().catch(() => {});
     if ( trader ) await trader.delete().catch(() => {});
     if ( restore !== null ) await game.settings.set(MODULE, "displayMode", restore);
   }
@@ -924,9 +957,105 @@ function rawKeys(root) {
 
 /* -------------------------------------------- */
 
+/**
+ * The magic item chooser, in both display modes: a dropped DMG template and the Stock tab's
+ * "Magic item…" button must each open a dialog the GM can actually see and use.
+ *
+ * Measured with `elementFromPoint` rather than trusted: in full screen the manager sits at a very
+ * high z-index, and a dialog that rendered underneath it looked fine to every other check while
+ * being impossible to click.
+ * @param {"windowed"|"fullscreen"} mode
+ */
+export async function magicItemDialogSuite(mode = "windowed") {
+  const report = new Report();
+  const api = game.modules.get(MODULE)?.api;
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const DialogV2 = foundry.applications.api.DialogV2;
+  const dialogNow = () => [...foundry.applications.instances.values()].find(a => a instanceof DialogV2);
+  const onTop = dialog => {
+    const rect = dialog.element.getBoundingClientRect();
+    return dialog.element.contains(document.elementFromPoint(rect.left + (rect.width / 2), rect.top + (rect.height / 2)));
+  };
+  let trader = null;
+  let app = null;
+  let restore = null;
+
+  try {
+    const pack = game.packs.get("dnd-dungeon-masters-guide.equipment");
+    if ( !report.check("the DMG is enabled", !!pack) ) return report.summary;
+    const index = await pack.getIndex({ fields: ["system.identifier"] });
+    const uuid = index.find(e => e.system?.identifier === "weapon-1-2-or-3")?.uuid;
+
+    restore = game.settings.get(MODULE, "displayMode");
+    await game.settings.set(MODULE, "displayMode", mode);
+    trader = await api.createTrader({ name: `${PREFIX} Magic Counter` });
+
+    const { TraderManagerApp } = await import(`/modules/${MODULE}/scripts/app/manager-app.mjs`);
+    await foundry.applications.instances.get(`${MODULE}-manager`)?.close();
+    app = TraderManagerApp.launch();
+    await wait(1500);
+    app.element.querySelector(`[data-trader-id="${trader.id}"] [data-action="selectTrader"]`)?.click();
+    await wait(500);
+    app.element.querySelector('[data-action="selectTab"][data-tab="stock"]')?.click();
+    await wait(500);
+
+    // A dropped template.
+    const transfer = new DataTransfer();
+    transfer.setData("text/plain", JSON.stringify({ type: "Item", uuid }));
+    app.element.dispatchEvent(new DragEvent("drop", { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    for ( let i = 0; i < 20 && !dialogNow(); i++ ) await wait(250);
+    let dialog = dialogNow();
+    if ( report.check("dropping a template opens the chooser", !!dialog) ) {
+      report.check("and the GM can see it", onTop(dialog), `dialog z=${getComputedStyle(dialog.element).zIndex}`);
+      await dialog.close();
+      await wait(300);
+    }
+
+    // The button.
+    const button = app.element.querySelector('[data-action="makeMagicItem"]');
+    if ( report.check("the Stock tab has a Magic item button", !!button) ) {
+      button.click();
+      for ( let i = 0; i < 60 && !dialogNow(); i++ ) await wait(250);
+      dialog = dialogNow();
+      if ( report.check("which opens the chooser", !!dialog) ) {
+        report.check("where the GM can see it", onTop(dialog), `dialog z=${getComputedStyle(dialog.element).zIndex}`);
+        const select = dialog.element.querySelector("[name=template]");
+        report.check("listing the templates to choose from", (select?.options.length ?? 0) > 1);
+        const plus = [...(select?.options ?? [])].find(o => o.value === uuid);
+        if ( plus ) {
+          select.value = plus.value;
+          select.dispatchEvent(new Event("change"));
+          await wait(1200);
+        }
+        const profile = dialog.element.querySelector("[name=profile]");
+        report.check("changing the template reloads its enchantments", profile?.options[0]?.textContent.startsWith("Weapon +1"),
+          profile?.options[0]?.textContent);
+        const base = dialog.element.querySelector("[name=base]");
+        const longsword = [...(base?.options ?? [])].find(o => o.textContent.startsWith("Longsword"));
+        if ( longsword ) base.value = longsword.value;
+        dialog.element.querySelector('[data-action="ok"]')?.click();
+        await wait(2000);
+        report.check("and confirming stocks the finished item", trader.items.some(i => i.name === "Longsword +1"),
+          trader.items.map(i => i.name).join(", "));
+      }
+    }
+  } catch ( err ) {
+    report.fail(`magicItemDialogSuite (${mode}) threw`, err);
+  } finally {
+    await dialogNow()?.close().catch(() => {});
+    await app?.close().catch(() => {});
+    if ( trader ) await trader.delete().catch(() => {});
+    if ( restore !== null ) await game.settings.set(MODULE, "displayMode", restore);
+  }
+  for ( const item of report.cases ) item.name = `[${mode}] ${item.name}`;
+  return report.summary;
+}
+
 export async function all() {
   const suites = {
     manager: managerSuite,
+    "magic-item-dialog": () => magicItemDialogSuite("windowed"),
+    "magic-item-dialog-fullscreen": () => magicItemDialogSuite("fullscreen"),
     shop: () => shopSuite("windowed"),
     "shop-fullscreen": () => shopSuite("fullscreen"),
     "type-filter": typeFilterSuite,

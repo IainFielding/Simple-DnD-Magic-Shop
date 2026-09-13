@@ -12,7 +12,7 @@ how much the Trader likes them. Buy, sell, or barter item-for-item; gold and goo
 sides, and the Trader's purse can run dry.
 
 > **Feature complete and verified.** See [docs/PLAN.md](docs/PLAN.md) for the design and
-> [docs/API.md](docs/API.md) for the module API. 195 unit tests and 120 end-to-end assertions
+> [docs/API.md](docs/API.md) for the module API. 369 unit tests and 532 end-to-end assertions
 > against a live Foundry world, run with a GM and two player clients joined at once.
 
 ## Requirements
@@ -35,7 +35,8 @@ sides, and the Trader's purse can run dry.
 - **The GM is the authority.** A player's client never computes a price it then gets to pay: it
   sends what it wants — item ids and quantities, nothing price-shaped — and a GM client derives
   the price, re-checks the stock, the purses and the buy filter, and settles. A trade is
-  all-or-nothing: a refusal or a vetoed trade writes nothing at all.
+  all-or-nothing: a refusal or a vetoed trade writes nothing at all, and a write that fails
+  partway is undone. A GM with the game open in two tabs still settles each trade exactly once.
 - **Trade and Barter.** Gold on one side, or goods against goods with coin balancing the
   difference. A sale and a purchase settle together, so trading the old sword toward the new one
   works even when the purse alone could not cover it.
@@ -47,6 +48,21 @@ sides, and the Trader's purse can run dry.
   built-ins, stock its shelves in the same click, or save your own Trader as an archetype.
 - **Export and import.** Download a Trader, stock and all, and import it into another world. What
   it thinks of your players, and its ledger, stay behind.
+- **Real magic items.** The Dungeon Master's Guide ships "Weapon, +1, +2, or +3" and Flame Tongue
+  as templates with no weapon attached. Press **Magic item…** in the Stock tab (or drop a template
+  on the Trader), choose the template, the enchantment and the
+  base item, and the Trader stocks a real "Longsword +1". The generator and roll tables do the same
+  at random, and **Spell scroll…** (or dropping a spell) stocks a real scroll of that spell.
+- **See why a price is what it is.** Hover a price for where it comes from: the list value, the
+  character's Charisma, the Trader's attitude. Gems, art objects and trade goods trade at full
+  value, as the rules say.
+- **Haggle.** A player picks Persuasion, Deception, Intimidation or Performance and makes the
+  check, rolled by the GM's client for everyone to see. Success warms the Trader; failure cools it
+  and rules that approach out until tomorrow.
+- **Show to players.** One button opens the shop on every connected player's screen, each at
+  their own character's prices.
+- **Items change hands clean.** A player's pack shows what they have equipped or attuned, and a
+  sold or bought item arrives unequipped and unattuned.
 
 ## Settings
 

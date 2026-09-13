@@ -9,9 +9,10 @@ import {
   createTrader, deleteTrader, duplicateTrader, getTrader, importTrader, listTraders
 } from "./data/registry.mjs";
 import {
-  addStockItems, applyArchetype, clearLedger, getAttitude, ledgerOf, nudgeAttitude, restockTrader,
-  setAttitude, spendFor, stockEntries, stockFromRecipe, stockLine, traderData
+  addMadeStock, addStockItems, applyArchetype, clearLedger, getAttitude, ledgerOf, nudgeAttitude,
+  restockTrader, setAttitude, spendFor, stockEntries, stockFromRecipe, stockLine, traderData
 } from "./data/trader.mjs";
+import { makeEnchantedData, makeScrollData, templateChoices } from "./data/enchant.mjs";
 import { sanitizeLine } from "./data/stock.mjs";
 import {
   archetypeFromTrader, deleteArchetype, getArchetype, listArchetypes, saveArchetype
@@ -23,6 +24,7 @@ import { QUERIES, askGM, gmAvailable } from "./trade/queries.mjs";
 import { ShopApp } from "./app/shop-app.mjs";
 import { TraderManagerApp } from "./app/manager-app.mjs";
 import { postTraderCard } from "./app/chat-card.mjs";
+import { showToPlayers } from "./app/show.mjs";
 
 /**
  * The module's public API, installed on `game.modules.get(MODULE_ID).api`.
@@ -190,7 +192,7 @@ export function buildApi() {
         uuid: trader.uuid,
         name: trader.name,
         img: trader.img,
-        stockCount: trader.items.size
+        stockCount: stockEntries(trader).length
       }));
     },
 
@@ -320,15 +322,66 @@ export function buildApi() {
 
     /**
      * Add stock from item uuids. Repeats raise the existing line rather than adding a row.
+     *
+     * A spell is stocked as a scroll of it, and a DMG magic item template ("Weapon, +1, +2, or +3")
+     * as a real item made from it at random. Pass `synthesize: false` to stock them as they are, or
+     * use {@link api.addEnchantedStock} to choose.
      * @param {string} traderId
      * @param {string|string[]} uuids
-     * @param {{qty?: number, line?: object}} [options]
-     * @returns {Promise<{created: object[], raised: object[], failed: string[]}>}
+     * @param {{qty?: number, line?: object, synthesize?: boolean}} [options]
+     * @returns {Promise<{created: object[], raised: object[], failed: string[], rejected: object[]}>}
      */
     async addStock(traderId, uuids, options = {}) {
       requireGM("addStock");
       const list = Array.isArray(uuids) ? uuids : [uuids];
       return addStockItems(traderOrThrow(traderId), list, options);
+    },
+
+    /**
+     * What can be made from a DMG magic item template: each enchantment, with the base items it can
+     * go on. Empty for anything that is not a template.
+     * @param {string} templateUuid
+     * @returns {Promise<{key: string, name: string, rarity: string, bases: {uuid: string, name: string, valueCp: number}[]}[]>}
+     */
+    async getEnchantments(templateUuid) {
+      requireGM("getEnchantments");
+      const { choices } = await templateChoices(templateUuid);
+      return choices.map(({ profile, bases }) => ({
+        key: profile.key,
+        name: profile.name,
+        rarity: profile.rarity,
+        bases: bases.map(b => ({ uuid: b.uuid, name: b.name, valueCp: b.valueCp }))
+      }));
+    },
+
+    /**
+     * Stock a real magic item made from a DMG template: the chosen enchantment on the chosen base.
+     * @param {string} traderId
+     * @param {{template: string, enchantment: string, base: string, qty?: number}} params
+     *   `enchantment` is a key from {@link api.getEnchantments}; `base` a base item uuid from it.
+     * @returns {Promise<{created: object[], raised: object[], failed: string[]}>}
+     */
+    async addEnchantedStock(traderId, { template, enchantment, base, qty = 1 } = {}) {
+      requireGM("addEnchantedStock");
+      const trader = traderOrThrow(traderId);
+      const data = await makeEnchantedData({ template, profileKey: enchantment, baseUuid: base });
+      if ( !data ) throw new Error(t("error.cannotEnchant"));
+      return addMadeStock(trader, [data], { qty });
+    },
+
+    /**
+     * Stock a spell scroll of a spell.
+     * @param {string} traderId
+     * @param {string} spellUuid
+     * @param {{qty?: number}} [options]
+     * @returns {Promise<{created: object[], raised: object[], failed: string[]}>}
+     */
+    async addScrollStock(traderId, spellUuid, { qty = 1 } = {}) {
+      requireGM("addScrollStock");
+      const trader = traderOrThrow(traderId);
+      const data = await makeScrollData(spellUuid);
+      if ( !data ) throw new Error(t("error.cannotScroll"));
+      return addMadeStock(trader, [data], { qty });
     },
 
     /** Remove one stock line. */
@@ -468,6 +521,16 @@ export function buildApi() {
       return postTraderCard(idOrUuid, options);
     },
 
+    /**
+     * Open a Trader's shop on every connected player's screen, for their own character.
+     * @param {string} traderId
+     * @returns {Promise<{opened: string[], skipped: {name: string, reason: string}[]}>}
+     */
+    async showToPlayers(traderId) {
+      requireGM("showToPlayers");
+      return showToPlayers(traderOrThrow(traderId).id);
+    },
+
     /** Open the GM's Trader Manager. */
     openManager() {
       requireGM("openManager");
@@ -523,6 +586,21 @@ export function buildApi() {
       return api.trade({
         traderId, actor, payer, mode: "barter", buy: take, sell: give, goldCp
       });
+    },
+
+    /**
+     * Haggle: make a Charisma skill check against a Trader, rolled on the GM's client. Success
+     * raises the Trader's attitude; failure lowers it and locks that skill until the next in-game
+     * day.
+     * @param {object} params
+     * @param {string} params.traderId
+     * @param {object|string} [params.actor]
+     * @param {string} params.skill   "per", "dec", "itm" or "prf".
+     * @returns {Promise<{skill: string, dc: number, total: number, success: boolean, from: number, to: number}>}
+     */
+    async haggle({ traderId, actor, skill } = {}) {
+      const character = characterOrThrow(actor);
+      return askGM(QUERIES.haggle, { traderId, actorId: character.id, skill });
     },
 
     /**

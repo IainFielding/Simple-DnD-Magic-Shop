@@ -169,6 +169,16 @@
           <i class="fa-solid fa-magnifying-glass"></i>
           {{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.browse"}}
         </button>
+        {{!-- Real magic items from the DMG's templates ("Weapon, +1, +2, or +3"), and scrolls of real
+              spells. Dropping a template or a spell onto this window does the same. --}}
+        <button type="button" class="shop-btn" data-action="makeMagicItem">
+          <i class="fa-solid fa-wand-sparkles"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.enchant.button"}}
+        </button>
+        <button type="button" class="shop-btn" data-action="makeScroll">
+          <i class="fa-solid fa-scroll"></i>
+          {{localize "sogrom-simple-dnd5e-magic-shop.manager.enchant.scrollButton"}}
+        </button>
         <button type="button" class="shop-btn {{#if generator.open}}is-on{{/if}}"
                 data-action="toggleGenerator" aria-expanded="{{#if generator.open}}true{{else}}false{{/if}}">
           <i class="fa-solid fa-dice-d20"></i>

@@ -128,8 +128,29 @@ export const HOOKS = Object.freeze({
   /** `{trader}` — **cancellable**; return false to skip a restock. */
   preRestock: `${HOOK_PREFIX}.preRestock`,
   /** `{trader, added}` — stock was replenished; `added` is per-line `{itemId, from, to}`. */
-  restocked: `${HOOK_PREFIX}.restocked`
+  restocked: `${HOOK_PREFIX}.restocked`,
+
+  /**
+   * `{trader, actor, skill, dc, edge}` — **cancellable**, fired on the GM client before a haggle
+   * check is rolled. Return false to refuse the attempt; nothing is rolled or locked.
+   */
+  preHaggle: `${HOOK_PREFIX}.preHaggle`,
+  /** `{trader, actor, skill, dc, total, success, from, to}` — a haggle check was rolled and applied. */
+  haggled: `${HOOK_PREFIX}.haggled`,
+
+  /** `{trader, results}` — the GM showed a Trader to the players; `results` is per user. */
+  traderShown: `${HOOK_PREFIX}.traderShown`
 });
+
+/**
+ * The dnd5e loot subtypes that trade at **full value**: gemstones, art objects and trade goods.
+ *
+ * The Dungeon Master's Guide is explicit that these are as good as coin — a merchant pays what
+ * they are worth and charges the same — so neither Charisma nor attitude moves their price. That
+ * is also why they earn no goodwill: buying a ruby and selling it straight back costs nothing, and
+ * a purchase that costs nothing must not be a way to make a Trader like you.
+ */
+export const FIXED_VALUE_LOOT = Object.freeze(["gem", "art", "trade"]);
 
 /**
  * Fire a notification-only hook. Never throws: a listener in another module blowing up must not
@@ -202,6 +223,12 @@ export const SETTINGS = {
   attitudeGainCap: "attitudeGainCap",
   /** Hidden. The GM's own saved archetypes; the built-in ones live in `data/archetypes.mjs`. */
   archetypes: "archetypes",
+  /** Whether gems, art objects and trade goods trade at full value. See {@link FIXED_VALUE_LOOT}. */
+  fixedValueGoods: "fixedValueGoods",
+  /** Attitude a successful haggle check earns. */
+  haggleSuccess: "haggleSuccess",
+  /** Attitude a failed haggle check costs. */
+  haggleFailure: "haggleFailure",
   debug: "debugLogging"
 };
 
@@ -264,6 +291,12 @@ export const DEFAULTS = {
   attitudeGainPerPoint: 10_000,
   attitudeGainCap: 5,
   archetypes: { list: [] },
+  fixedValueGoods: true,
+  // The 2024 Influence action gives no figure for how far a good pitch moves someone, so these are
+  // ours: five points is about what a day's generous spending earns, which keeps talking and paying
+  // on the same scale rather than letting one make the other pointless.
+  haggleSuccess: 5,
+  haggleFailure: 5,
   debug: false
 };
 

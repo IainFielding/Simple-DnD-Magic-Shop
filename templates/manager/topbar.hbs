@@ -22,6 +22,12 @@
       <i class="fa-solid fa-eye"></i>
       {{localize "sogrom-simple-dnd5e-magic-shop.manager.preview"}}
     </button>
+    {{!-- Opens the shop on every connected player’s screen for their own character, for when the
+          party walks in together. The card is still the way for everyone to find it later. --}}
+    <button type="button" class="shop-btn" data-action="showToPlayers">
+      <i class="fa-solid fa-users"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.manager.show.button"}}
+    </button>
     <button type="button" class="shop-btn shop-btn--primary" data-action="postCard">
       <i class="fa-solid fa-comment-dots"></i>
       {{localize "sogrom-simple-dnd5e-magic-shop.manager.postCard"}}

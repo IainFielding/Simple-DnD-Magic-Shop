@@ -47,15 +47,15 @@ const SURFACE = {
   ],
   read: [
     "listTraders", "getTrader", "getTraderData", "getAttitude", "getSpend", "getStock",
-    "getLedger", "listArchetypes", "getShopContext", "gmAvailable"
+    "getLedger", "listArchetypes", "getShopContext", "gmAvailable", "getEnchantments"
   ],
   write: [
     "createTrader", "duplicateTrader", "deleteTrader", "addStock", "removeStock",
     "setStockLine", "restock", "clearLedger", "setAttitude", "adjustAttitude",
     "applyArchetype", "saveArchetype", "deleteArchetype", "exportTrader", "importTrader",
-    "postTraderCard", "openManager"
+    "postTraderCard", "openManager", "addEnchantedStock", "addScrollStock", "showToPlayers"
   ],
-  trading: ["openShop", "buy", "sell", "barter", "trade"]
+  trading: ["openShop", "buy", "sell", "barter", "trade", "haggle"]
 };
 
 /** The hook aliases `docs/API.md` documents. */
@@ -66,7 +66,9 @@ const HOOK_ALIASES = [
   "preTrade", "tradeCompleted", "tradeRejected",
   "prePrice",
   "preAttitudeChange", "attitudeChanged",
-  "preRestock", "restocked"
+  "preRestock", "restocked",
+  "preHaggle", "haggled",
+  "traderShown"
 ];
 
 /* -------------------------------------------- */
@@ -379,14 +381,16 @@ export async function archetypeSuite() {
     const file = api.exportTrader(trader.id);
     const text = JSON.stringify(file);
     report.equal("an export identifies itself", file.format, `${MODULE}.trader`);
-    report.equal("and carries every stock line", file.items.length, trader.items.size);
+    // Stock lines, not embedded items: a stocked scroll brings a cached spell dnd5e adds for casting.
+    const lines = api.getStock(trader.id).length;
+    report.equal("and carries every stock line", file.items.length, lines);
     report.check("but no opinion of anyone", !text.includes("\"attitude\":{") && !text.includes(character?.id ?? "\u0000"),
       "an attitude map or a character id was exported");
 
     imported = await api.importTrader(text);
     report.check("an import creates a Trader", !!imported?.id && imported.id !== trader.id);
     report.equal("with the same name", imported.name, trader.name);
-    report.equal("the same stock", imported.items.size, trader.items.size);
+    report.equal("the same stock", api.getStock(imported.id).length, lines);
     const lantern = imported.items.find(i => i.name.includes("Exported Lantern"));
     report.equal("line settings intact", lantern?.flags?.[MODULE], {
       unlimited: false, overrideCp: 700, revealAt: 40, baseQty: 3

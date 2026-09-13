@@ -1,4 +1,5 @@
 import { MODULE_ID, log, t } from "../config.mjs";
+import { claim, claimKey, staySilent } from "./claim.mjs";
 
 /**
  * The client-to-GM boundary.
@@ -26,6 +27,10 @@ import { MODULE_ID, log, t } from "../config.mjs";
  * **One GM settles, even when several are online.** `game.users.activeGM` designates exactly
  * one, deterministically, so two GMs cannot both process the same purchase and hand out the
  * item twice.
+ *
+ * **One window settles, even when that GM has two open.** `activeGM` names a user, not a tab, and
+ * Foundry delivers a query to every tab the user has. Queries that write are declared
+ * `exclusive`, and each tab claims the request before acting on it — see `trade/claim.mjs`.
  */
 
 /** Every query this module registers, as `alias -> the prefixed name Foundry needs`. */
@@ -33,7 +38,14 @@ export const QUERIES = Object.freeze({
   /** `{traderId, actorId}` -> a shop context payload. */
   context: `${MODULE_ID}.shopContext`,
   /** `{traderId, actorId, mode, buy, sell, goldCp}` -> a receipt. */
-  trade: `${MODULE_ID}.trade`
+  trade: `${MODULE_ID}.trade`,
+  /** `{traderId, actorId, skill}` -> the outcome of a haggle check. */
+  haggle: `${MODULE_ID}.haggle`,
+  /**
+   * `{traderId}` -> whether this client opened the shop. The one query that runs on a **player's**
+   * client: the GM asks each player to open a shop for their own character.
+   */
+  showShop: `${MODULE_ID}.showShop`
 });
 
 /** How long a client waits for a GM before giving up, in milliseconds. */
@@ -49,13 +61,22 @@ const TIMEOUT = 20_000;
  */
 const handlers = new Map();
 
+/** The queries that write, and so must be claimed by exactly one tab. */
+const exclusive = new Set();
+
 /**
  * Declare the handler for one query. Called at module scope by the file that implements it.
  * @param {string} name      A value from {@link QUERIES}.
  * @param {(data: object, context: {user: object}) => Promise<*>} handler
+ * @param {object} [options]
+ * @param {boolean} [options.exclusive]  The handler writes: only one of the receiving user's tabs
+ *                                       may run it. Reads leave this off, since answering twice is
+ *                                       harmless and claiming costs a moment.
  */
-export function defineQuery(name, handler) {
+export function defineQuery(name, handler, { exclusive: writes = false } = {}) {
   handlers.set(name, handler);
+  if ( writes ) exclusive.add(name);
+  else exclusive.delete(name);
 }
 
 /**
@@ -70,6 +91,11 @@ export function registerQueries() {
   CONFIG.queries ??= {};
   for ( const [name, handler] of handlers ) {
     CONFIG.queries[name] = async (data, context) => {
+      // Claimed before the handler runs, so the losing tab does no work at all — not even the
+      // validation, whose refusal would otherwise race the winner's answer back to the player.
+      if ( exclusive.has(name) && !(await claim(claimKey(data, context?.user, name))) ) {
+        return staySilent(context?.timeout);
+      }
       try {
         return await handler(data, context);
       } catch ( err ) {
@@ -116,6 +142,9 @@ export function gmAvailable() {
  *                             refuses, or the request times out.
  */
 export async function askGM(name, data) {
+  // A fresh id per request, which is what every tab of the GM claims it under. Added here, once,
+  // so no caller can forget it.
+  data = { ...data, requestId: foundry.utils.randomID() };
   const gm = game.users.activeGM;
   if ( game.user.isGM && (!gm || gm.id === game.user.id) ) {
     const handler = handlers.get(name);

@@ -1,4 +1,4 @@
-import { PHYSICAL_TYPES, RARITIES, clamp, normalizeRarity } from "../config.mjs";
+import { FIXED_VALUE_LOOT, PHYSICAL_TYPES, RARITIES, clamp, normalizeRarity } from "../config.mjs";
 import { copperPerUnit, itemValueCp, toCopper } from "./pricing.mjs";
 
 /**
@@ -101,6 +101,20 @@ export function effectiveValueCp(item, line) {
 }
 
 /**
+ * Whether an item trades at full value — a gemstone, an art object or a trade good — so neither
+ * Charisma nor attitude moves its price. See `config.mjs#FIXED_VALUE_LOOT` for why.
+ *
+ * `enabled` is the world setting, injected so this stays pure.
+ * @param {object} item
+ * @param {boolean} [enabled]
+ * @returns {boolean}
+ */
+export function isFixedValue(item, enabled = true) {
+  if ( !enabled || item?.type !== "loot" ) return false;
+  return FIXED_VALUE_LOOT.includes(item?.system?.type?.value);
+}
+
+/**
  * How many of a line are on the shelf. `Infinity` for an unlimited line, which every caller
  * compares against rather than special-casing.
  * @param {object} item
@@ -111,6 +125,34 @@ export function availableQty(item, line) {
   if ( sanitizeLine(line).unlimited ) return Infinity;
   const qty = Number(item?.system?.quantity);
   return Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 0;
+}
+
+/* -------------------------------------------- */
+/*  Moving an item between actors (pure)        */
+/* -------------------------------------------- */
+
+/**
+ * An item's data, ready to be created on the actor receiving it.
+ *
+ * Whatever state the item was in belongs to whoever was using it, not to the item: a character
+ * who sells the cloak they are attuned to has not sold an *attuned* cloak. Left in, that state
+ * travelled — onto the Trader's shelf, and from there to the next buyer, who received it already
+ * equipped and attuned without ever spending the attunement slot it costs.
+ *
+ * Only fields the item's own data actually has are touched, so a type with no attunement does not
+ * grow an `attuned: false` it never had.
+ * @param {object} source   The item's `toObject()` data. Not modified.
+ * @param {number} qty      How many the receiving actor gets.
+ * @returns {object}        A new object, without an `_id`.
+ */
+export function transferData(source, qty) {
+  const data = structuredClone(source ?? {});
+  delete data._id;
+  const system = data.system && typeof data.system === "object" ? data.system : {};
+  data.system = { ...system, quantity: qty };
+  if ( "equipped" in system ) data.system.equipped = false;
+  if ( "attuned" in system ) data.system.attuned = false;
+  return data;
 }
 
 /* -------------------------------------------- */

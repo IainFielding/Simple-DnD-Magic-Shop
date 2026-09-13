@@ -336,12 +336,27 @@ export function multiplierBounds(anchors) {
 /* -------------------------------------------- */
 
 /**
+ * The multiplier one line actually trades at: the character's, or exactly 1 for goods that trade
+ * at full value (gems, art objects, trade goods — see `data/stock.mjs#isFixedValue`).
+ *
+ * One function, used by the shop's running totals and by settlement alike, so the price a player
+ * is shown and the price they pay can never apply the rule differently.
+ * @param {number} multiplier
+ * @param {boolean} [fixed]
+ * @returns {number}
+ */
+export function lineMultiplier(multiplier, fixed = false) {
+  return fixed ? 1 : multiplier;
+}
+
+/**
  * Price a basket of lines and total it.
  *
  * One shape serves buying, selling and both halves of a barter, because they differ only in
  * which multiplier applies. Each line keeps its own `unitCp` so a receipt can itemise, and the
- * caller gets the total it needs for an affordability check.
- * @param {{id: string, valueCp: number, qty: number}[]} lines
+ * caller gets the total it needs for an affordability check. A line marked `fixed` trades at full
+ * value whatever the multiplier.
+ * @param {{id: string, valueCp: number, qty: number, fixed?: boolean}[]} lines
  * @param {number} multiplier
  * @returns {{lines: {id: string, qty: number, unitCp: number, lineCp: number}[], totalCp: number}}
  */
@@ -351,7 +366,7 @@ export function priceBasket(lines, multiplier) {
   for ( const line of lines ?? [] ) {
     const qty = Math.max(0, Math.floor(Number(line?.qty) || 0));
     if ( qty <= 0 ) continue;
-    const unitCp = applyMultiplier(line?.valueCp, multiplier);
+    const unitCp = applyMultiplier(line?.valueCp, lineMultiplier(multiplier, !!line?.fixed));
     const lineCp = unitCp * qty;
     totalCp += lineCp;
     out.push({ id: line.id, qty, unitCp, lineCp });
@@ -392,6 +407,66 @@ export function barterBalance({ take, give, goldCp = 0, multipliers } = {}) {
     take: asked.lines,
     give: offered.lines
   };
+}
+
+/* -------------------------------------------- */
+/*  Explaining a price (pure)                   */
+/* -------------------------------------------- */
+
+/**
+ * Where a character's Favour comes from, term by term — what the shop's price breakdown shows.
+ *
+ * Uses the same weights and clamps as {@link favour}, so the parts shown always add up to the
+ * figure that actually priced the goods. `clamped` says when they did not, which only happens
+ * off the edge of the curve.
+ * @param {object} params
+ * @param {number} [params.chaMod]
+ * @param {number} [params.attitude]
+ * @returns {{chaMod: number, chaFavour: number, attitude: number, attitudeFavour: number,
+ *   total: number, clamped: boolean}}
+ */
+export function favourBreakdown({ chaMod = 0, attitude = ATTITUDE_CENTRE } = {}) {
+  const cha = clamp(chaMod, CHA_MOD_RANGE[0], CHA_MOD_RANGE[1]);
+  const att = clamp(attitude, 0, 100);
+  const chaFavour = CHA_WEIGHT * cha;
+  const attitudeFavour = ATTITUDE_WEIGHT * (att - ATTITUDE_CENTRE);
+  const total = favour({ chaMod, attitude });
+  return {
+    chaMod: Math.round(cha),
+    chaFavour,
+    attitude: Math.round(att),
+    attitudeFavour,
+    total,
+    clamped: Math.abs((chaFavour + attitudeFavour) - total) > 1e-9
+  };
+}
+
+/* -------------------------------------------- */
+/*  Goodwill (pure)                             */
+/* -------------------------------------------- */
+
+/**
+ * How much of a deal counts as *spending* for the goodwill drift.
+ *
+ * Only goods bought at the Trader's own prices count. Goods that trade at full value do not: a
+ * character who buys a ruby and sells it straight back has spent nothing, and a purchase that
+ * costs nothing must not be a way to make a Trader like you.
+ *
+ *  - **Trade:** what left the purse, capped at the ordinary goods bought — selling the old sword
+ *    toward the new one still counts the new one, net of the sale, as before.
+ *  - **Barter:** the whole offer, capped the same way.
+ * @param {object} params
+ * @param {"trade"|"barter"} params.mode
+ * @param {number} params.costCp          Everything taken, at the prices charged.
+ * @param {number} [params.fixedCostCp]   The full-value part of `costCp`.
+ * @param {number} [params.netCp]         Coin paid (+) or received (−) in a trade.
+ * @param {number} [params.creditCp]      A barter's whole offer.
+ * @returns {number}  Copper, never negative.
+ */
+export function goodwillSpendCp({ mode, costCp = 0, fixedCostCp = 0, netCp = 0, creditCp = 0 } = {}) {
+  const ordinary = Math.max(0, Math.round(Number(costCp) || 0) - Math.round(Number(fixedCostCp) || 0));
+  const spent = mode === "barter" ? Math.round(Number(creditCp) || 0) : Math.round(Number(netCp) || 0);
+  return Math.max(0, Math.min(ordinary, spent));
 }
 
 /* -------------------------------------------- */

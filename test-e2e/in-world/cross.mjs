@@ -196,3 +196,45 @@ function openStockTile(app) {
 function openStockBadge(app) {
   return openStockTile(app)?.querySelector(".shop-tile-badge")?.textContent.trim() ?? null;
 }
+
+/* -------------------------------------------- */
+/*  Show, haggle and two-tab checks (player)    */
+/* -------------------------------------------- */
+
+/** Whether this player has a shop open for a Trader, after giving it a moment. Runs as a player. */
+export async function shopOpenFor({ traderId, waitMs = 1500 }) {
+  await new Promise(resolve => setTimeout(resolve, waitMs));
+  const { ShopApp } = await import(`${BASE}/app/shop-app.mjs`);
+  // A player can read the Trader's name, since every actor replicates; the shop window is titled with it.
+  const name = game.actors.get(traderId)?.name;
+  return { open: ShopApp.instances.some(app => app.element?.isConnected && app.title === name) };
+}
+
+/** Haggle through the API, which asks the GM. Runs as a player. */
+export async function haggleAsPlayer({ traderId, skill, actorId }) {
+  try {
+    const outcome = await game.modules.get(MODULE).api.haggle({ traderId, skill, actor: actorId });
+    return { ok: true, outcome };
+  } catch ( err ) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/** Buy through the API, which asks the GM. Runs as a player. */
+export async function buyAsPlayer({ traderId, itemId, qty = 1 }) {
+  try {
+    const result = await game.modules.get(MODULE).api.buy({ traderId, lines: [{ id: itemId, qty }] });
+    return { ok: true, result };
+  } catch ( err ) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/** The ids and names of characters, for a forged-actor check. Runs as a player. */
+export async function whoAmI() {
+  return {
+    character: game.user.character?.id ?? null,
+    characterName: game.user.character?.name ?? null,
+    other: game.actors.find(a => a.type === "character" && !a.isOwner)?.id ?? null
+  };
+}

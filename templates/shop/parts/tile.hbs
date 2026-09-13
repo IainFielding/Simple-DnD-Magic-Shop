@@ -28,6 +28,9 @@
     exhausted   true when every unit is already on the counter. Dimmed but **not** disabled:
                 a disabled button receives no mouse events, and right-click has to reach it to
                 put the item back
+    equipped    the character is wearing or wielding it (pack tiles only)
+    attuned     the character is attuned to it (pack tiles only)
+    statusNote  both of those in words, for the label — the icons are not the only cue
 --}}
 <li class="shop-tile{{#if rarity}} rarity-{{rarity}}{{/if}}{{#if staged}} is-staged{{/if}}{{#if blocked}} is-blocked{{/if}}{{#if exhausted}} is-exhausted{{/if}}"
     data-item-id="{{id}}" data-uuid="{{uuid}}" data-name="{{name}}" data-categories="{{categories}}">
@@ -35,7 +38,7 @@
   <button type="button" class="shop-tile-button" data-action="stageLine" data-item-id="{{id}}"
           {{#if blocked}}disabled{{/if}}
           {{#if blocked}}data-tooltip="{{blockedWhy}}"{{else}}data-tooltip="{{shopItemTooltip uuid}}"{{/if}}
-          aria-label="{{name}}{{#if price}} — {{price}}{{/if}}{{#if exhaustedNote}} — {{exhaustedNote}}{{/if}}">
+          aria-label="{{name}}{{#if price}} — {{price}}{{/if}}{{#if statusNote}} — {{statusNote}}{{/if}}{{#if exhaustedNote}} — {{exhaustedNote}}{{/if}}">
     <img class="shop-tile-img" src="{{img}}" alt="">
 
     {{#if unlimited}}
@@ -47,5 +50,14 @@
     {{/if}}
 
     {{#if staged}}<span class="shop-tile-staged">{{staged}}</span>{{/if}}
+
+    {{!-- Top right, clear of the staged badge (top left) and the count (bottom right). The same
+          icons dnd5e's own inventory uses, so they need no learning. --}}
+    {{#if (or equipped attuned)}}
+    <span class="shop-tile-status" aria-hidden="true">
+      {{#if equipped}}<i class="fa-solid fa-shield-halved"></i>{{/if}}
+      {{#if attuned}}<i class="fa-solid fa-sun"></i>{{/if}}
+    </span>
+    {{/if}}
   </button>
 </li>

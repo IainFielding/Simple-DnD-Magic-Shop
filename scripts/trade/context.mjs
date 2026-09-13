@@ -1,11 +1,21 @@
-import { HOOKS, fireCancellableHook, log, normalizeRarity, t } from "../config.mjs";
+import {
+  HOOKS, SETTINGS, fireCancellableHook, log, normalizeRarity, pricingAnchors, setting, t
+} from "../config.mjs";
 import { attitudeTier } from "../data/attitude.mjs";
+import { HAGGLE_SKILLS, haggleDc, haggleEdge, isHaggleLocked } from "../data/haggle.mjs";
 import { entriesFor } from "../data/ledger.mjs";
 import { canPayFrom, payableGroups } from "../data/party.mjs";
-import { formatCp, resolveMultipliers, totalCp } from "../data/pricing.mjs";
+import {
+  applyMultiplier, favourBreakdown, formatCp, lineMultiplier, priceMultipliers, resolveMultipliers,
+  totalCp
+} from "../data/pricing.mjs";
 import { getTrader } from "../data/registry.mjs";
-import { acceptsItem, availableQty, effectiveValueCp, lineVisible } from "../data/stock.mjs";
-import { getAttitude, ledgerOf, purse, stockEntries, traderData } from "../data/trader.mjs";
+import {
+  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible
+} from "../data/stock.mjs";
+import {
+  getAttitude, haggleRecordFor, ledgerOf, purse, stockEntries, traderData
+} from "../data/trader.mjs";
 import { QUERIES, defineQuery } from "./queries.mjs";
 
 /**
@@ -125,6 +135,7 @@ export function buildShopContext(trader, actor, { payer = actor, user = game.use
   // it per item would be waste — and `resolveMultipliers` fires `prePrice`, which a listener
   // would then see once per line for no reason.
   const multipliers = resolveMultipliers({ trader, actor, chaMod, attitude });
+  const fixedValue = !!setting(SETTINGS.fixedValueGoods);
 
   return {
     trader: {
@@ -168,8 +179,61 @@ export function buildShopContext(trader, actor, { payer = actor, user = game.use
       buyLabel: multipliers.buy.toFixed(2),
       sellLabel: multipliers.sell.toFixed(2)
     },
-    stock: visibleStock(trader, attitude, multipliers),
-    pack: sellableInventory(trader, actor, multipliers)
+    // Why the multipliers are what they are, for the shop's price breakdown.
+    pricing: pricingView({ chaMod, attitude, multipliers }),
+    haggle: haggleView(trader, actor, attitude),
+    stock: visibleStock(trader, attitude, multipliers, fixedValue),
+    pack: sellableInventory(trader, actor, multipliers, fixedValue)
+  };
+}
+
+/**
+ * The parts a price is made of, as the shop's breakdown tooltip shows them.
+ *
+ * `adjusted` says a `prePrice` listener changed the multipliers. The breakdown then says so rather
+ * than showing Charisma and attitude adding up to a figure they no longer produce — a house rule or
+ * a guild discount is a real part of the price, and hiding it would make the numbers look wrong.
+ * @param {object} params
+ * @param {number} params.chaMod
+ * @param {number} params.attitude
+ * @param {{buy: number, sell: number}} params.multipliers  As resolved, hook included.
+ * @returns {object}
+ */
+function pricingView({ chaMod, attitude, multipliers }) {
+  const parts = favourBreakdown({ chaMod, attitude });
+  const base = priceMultipliers({ favour: parts.total, anchors: pricingAnchors() });
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  return {
+    ...parts,
+    tier: attitudeTier(attitude).label,
+    buy: multipliers.buy,
+    sell: multipliers.sell,
+    adjusted: !near(base.buy, multipliers.buy) || !near(base.sell, multipliers.sell)
+  };
+}
+
+/**
+ * What a character can try when haggling here: the DC, the edge the Trader's mood gives, and each
+ * Charisma skill with the character's bonus and whether it is locked for today.
+ * @param {object} trader
+ * @param {object} actor
+ * @param {number} attitude
+ * @returns {object}
+ */
+function haggleView(trader, actor, attitude) {
+  const record = haggleRecordFor(trader, actor);
+  const worldTime = game.time.worldTime;
+  return {
+    dc: haggleDc(trader.system?.abilities?.int?.value),
+    edge: haggleEdge(attitude),
+    gain: Math.max(0, Math.round(Number(setting(SETTINGS.haggleSuccess)) || 0)),
+    loss: Math.max(0, Math.round(Number(setting(SETTINGS.haggleFailure)) || 0)),
+    skills: HAGGLE_SKILLS.map(key => ({
+      key,
+      label: game.i18n.localize(CONFIG.DND5E?.skills?.[key]?.label ?? key),
+      mod: Number(actor.system?.skills?.[key]?.total) || 0,
+      locked: isHaggleLocked(record, key, worldTime)
+    }))
   };
 }
 
@@ -266,7 +330,7 @@ export function formatWorldTime(worldTime) {
  * does nothing.
  * @returns {object[]}
  */
-function visibleStock(trader, attitude, multipliers) {
+function visibleStock(trader, attitude, multipliers, fixedValue) {
   const out = [];
   for ( const { id, item, line } of stockEntries(trader) ) {
     if ( !lineVisible(line, attitude) ) continue;
@@ -276,7 +340,9 @@ function visibleStock(trader, attitude, multipliers) {
     const qty = availableQty(item, line);
     if ( qty <= 0 ) continue;
 
-    const buyCp = Math.max(1, Math.round(valueCp * multipliers.buy));
+    // Priced by the same function settlement uses, so the two can never round differently.
+    const fixed = isFixedValue(item, fixedValue);
+    const buyCp = applyMultiplier(valueCp, lineMultiplier(multipliers.buy, fixed));
     out.push({
       id,
       uuid: item.uuid,
@@ -290,6 +356,7 @@ function visibleStock(trader, attitude, multipliers) {
       unlimited: qty === Infinity,
       qty: qty === Infinity ? 0 : qty,
       valueCp,
+      fixed,
       buyCp,
       price: formatCp(buyCp)
     });
@@ -304,10 +371,11 @@ function visibleStock(trader, attitude, multipliers) {
  * `blocked` with a reason, because a greyed tile that does not say why is a bug report waiting
  * to happen. Equipped and attuned items are flagged rather than withheld: selling the armour
  * you are standing in is a decision a player is allowed to make, and dnd5e itself does not
- * stop them.
+ * stop them. The flags are what let the shop *say* so — the item arrives on the Trader's shelf
+ * unequipped and unattuned either way.
  * @returns {object[]}
  */
-function sellableInventory(trader, actor, multipliers) {
+function sellableInventory(trader, actor, multipliers, fixedValue) {
   const filter = traderData(trader).buyFilter;
   const out = [];
 
@@ -326,7 +394,8 @@ function sellableInventory(trader, actor, multipliers) {
     const qty = Math.max(0, Math.floor(Number(item.system?.quantity) || 0));
     if ( qty <= 0 ) continue;
 
-    const sellCp = accepted ? Math.max(1, Math.round(valueCp * multipliers.sell)) : 0;
+    const fixed = isFixedValue(item, fixedValue);
+    const sellCp = accepted ? applyMultiplier(valueCp, lineMultiplier(multipliers.sell, fixed)) : 0;
     out.push({
       id: item.id,
       uuid: item.uuid,
@@ -337,9 +406,11 @@ function sellableInventory(trader, actor, multipliers) {
       rarity: normalizeRarity(item.system?.rarity),
       qty,
       valueCp,
+      fixed,
       sellCp,
       price: accepted ? formatCp(sellCp) : "",
       equipped: !!item.system?.equipped,
+      attuned: !!item.system?.attuned,
       blocked: !accepted,
       blockedWhy: accepted ? null : t(`reject.${reason}`)
     });

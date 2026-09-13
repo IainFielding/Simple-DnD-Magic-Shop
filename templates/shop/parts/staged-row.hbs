@@ -11,7 +11,15 @@
   <img class="shop-staged-img" src="{{img}}" alt="" data-tooltip="{{shopItemTooltip uuid}}">
   <span class="shop-staged-main">
     <span class="shop-staged-name">{{name}}</span>
-    <span class="shop-staged-line">{{line}}</span>
+    {{!-- Hover the price for where it comes from. --}}
+    <span class="shop-staged-line" {{#if priceTooltip}}data-tooltip="{{priceTooltip}}" data-tooltip-class="property-attribution"{{/if}}>{{line}}</span>
+    {{!-- Selling something the character is using: say plainly that the state does not go with it. --}}
+    {{#if statusNote}}
+    <span class="shop-staged-status">
+      <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.shop.loseStatus" status=statusNote}}
+    </span>
+    {{/if}}
   </span>
   <span class="shop-staged-qty">&times;{{qty}}</span>
   <button type="button" class="shop-icon-btn" data-action="unstageLine"

@@ -5,6 +5,7 @@ import { QUERIES, askGM, gmAvailable } from "../trade/queries.mjs";
 import { ShopShellBase } from "./shell-base.mjs";
 import { categoryOptions } from "./categories.mjs";
 import { yieldTakeoverTo } from "./takeover.mjs";
+import { lineBreakdown, rateBreakdown, signed } from "./price-breakdown.mjs";
 import { ShopState } from "./shop-state.mjs";
 
 /**
@@ -49,7 +50,8 @@ export class ShopApp extends ShopShellBase {
       confirmTrade: ShopApp.#onConfirmTrade,
       openLineItem: ShopApp.#onOpenLineItem,
       refresh: ShopApp.#onRefresh,
-      toggleHistory: ShopApp.#onToggleHistory
+      toggleHistory: ShopApp.#onToggleHistory,
+      haggle: ShopApp.#onHaggle
     }
   };
 
@@ -193,6 +195,9 @@ export class ShopApp extends ShopShellBase {
       history: context.history ?? [],
       attitude: context.attitude,
       multipliers: context.multipliers,
+      // Where the multipliers come from, on hover over the rate line.
+      rateTooltip: rateBreakdown(context.pricing, this.#breakdownLabels()),
+      canHaggle: !!context.haggle?.skills?.some(skill => !skill.locked),
       mode: this.#state.mode,
       barter: this.#state.mode === "barter",
       stock: context.stock.map(line => this.#tile(line, "take")),
@@ -252,7 +257,36 @@ export class ShopApp extends ShopShellBase {
       blocked: !!line.blocked,
       exhausted: !line.blocked && remaining <= 0,
       blockedWhy: line.blocked ? line.blockedWhy : null,
-      exhaustedNote: (!line.blocked && remaining <= 0) ? t("shop.noneLeft") : null
+      exhaustedNote: (!line.blocked && remaining <= 0) ? t("shop.noneLeft") : null,
+      // The character's own gear says what state it is in, and that the state stays with them:
+      // a sold item reaches the Trader unequipped and unattuned.
+      equipped: !!line.equipped,
+      attuned: !!line.attuned,
+      statusNote: this.#statusNote(line)
+    };
+  }
+
+  /** "Equipped", "Attuned", or both, for a pack line's label; "" when it is neither. */
+  #statusNote(line) {
+    const parts = [];
+    if ( line.equipped ) parts.push(t("shop.equipped"));
+    if ( line.attuned ) parts.push(t("shop.attuned"));
+    return parts.join(", ");
+  }
+
+  /** The words the price breakdown needs, localised once per render. */
+  #breakdownLabels() {
+    return {
+      caption: t("shop.breakdown.caption"),
+      listValue: t("shop.breakdown.listValue"),
+      fullValue: t("shop.breakdown.fullValue"),
+      charisma: mod => t("shop.breakdown.charisma", { mod: mod >= 0 ? `+${mod}` : `${mod}` }),
+      attitude: (value, tier) => t("shop.breakdown.attitude", { value, tier }),
+      adjusted: t("shop.breakdown.adjusted"),
+      youPay: t("shop.breakdown.youPay"),
+      theyPay: t("shop.breakdown.theyPay"),
+      favour: t("shop.breakdown.favour"),
+      each: t("shop.breakdown.each")
     };
   }
 
@@ -265,6 +299,10 @@ export class ShopApp extends ShopShellBase {
       if ( qty <= 0 ) continue;
       const unitCp = side === "take" ? line.buyCp : line.sellCp;
       rows.push({
+        priceTooltip: lineBreakdown({
+          line, side, pricing: this.#state.context.pricing, labels: this.#breakdownLabels()
+        }),
+        statusNote: side === "give" ? this.#statusNote(line) : "",
         id: line.id,
         uuid: line.uuid,
         name: line.name,
@@ -551,6 +589,55 @@ export class ShopApp extends ShopShellBase {
   static #onToggleHistory() {
     this.#showHistory = !this.#showHistory;
     this.render({ parts: ["topbar", "stage"] });
+  }
+
+  /**
+   * Haggle: pick a Charisma skill and ask the GM to roll it.
+   *
+   * The dialog is only a chooser. The check is rolled on the GM's client, which also decides
+   * whether the skill is still allowed today and applies the outcome — see trade/haggle.mjs — so a
+   * player can pick which way to talk, never how well it went.
+   */
+  static async #onHaggle() {
+    const haggle = this.#state.context?.haggle;
+    if ( !haggle || this.#settling ) return;
+    const esc = foundry.utils.escapeHTML;
+    const first = haggle.skills.find(s => !s.locked)?.key;
+    const options = haggle.skills.map(skill => `
+      <label class="shop-haggle-skill ${skill.locked ? "is-locked" : ""}">
+        <input type="radio" name="haggleSkill" value="${skill.key}"
+               ${skill.locked ? "disabled" : ""} ${skill.key === first ? "checked" : ""}>
+        <span class="shop-haggle-name">${esc(skill.label)}</span>
+        <span class="shop-haggle-mod">${skill.mod >= 0 ? "+" : ""}${skill.mod}</span>
+        ${skill.locked ? `<span class="shop-haggle-lock">${t("haggle.locked")}</span>` : ""}
+      </label>`).join("");
+
+    const skill = await foundry.applications.api.DialogV2.prompt({
+      window: { title: t("haggle.title", { trader: this.#state.context.trader.name }), icon: "fa-solid fa-comments" },
+      classes: ["sogrom-shop-dialog"],
+      content: `<p>${t("haggle.intro")}</p>
+        <p class="shop-haggle-terms">${t("haggle.terms", { dc: haggle.dc, gain: haggle.gain, loss: haggle.loss })}</p>
+        ${haggle.edge === "normal" ? "" : `<p class="shop-haggle-edge">${t(`haggle.edge.${haggle.edge}`)}</p>`}
+        <fieldset class="shop-haggle-skills"><legend>${t("haggle.skill")}</legend>${options}</fieldset>`,
+      ok: {
+        label: t("haggle.roll"),
+        icon: "fa-solid fa-dice-d20",
+        callback: (_event, button) => button.form.elements.haggleSkill?.value
+          ?? [...button.form.querySelectorAll("[name=haggleSkill]")].find(i => i.checked)?.value
+      },
+      rejectClose: false
+    });
+    if ( !skill ) return;
+
+    try {
+      const outcome = await askGM(QUERIES.haggle, { traderId: this.#traderId, actorId: this.#actorId, skill });
+      const words = { total: outcome.total, dc: outcome.dc, change: signed(outcome.to - outcome.from).replace(".00", "") };
+      if ( outcome.success ) ui.notifications.info(t("haggle.success", words));
+      else ui.notifications.warn(t("haggle.failure", words));
+    } catch ( err ) {
+      ui.notifications.warn(err.message);
+    }
+    await this.refresh().catch(() => this.render());
   }
 
   static async #onRefresh() {

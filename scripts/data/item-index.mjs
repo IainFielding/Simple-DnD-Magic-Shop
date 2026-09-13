@@ -16,7 +16,12 @@ import { itemValueCp } from "./pricing.mjs";
  */
 
 /** Index fields the pool needs beyond name/img/type, which every index carries anyway. */
-const INDEX_FIELDS = new Set(["system.price", "system.rarity", "system.type", "system.quantity"]);
+const INDEX_FIELDS = new Set([
+  "system.price", "system.rarity", "system.type", "system.quantity",
+  // Both small, and both needed to tell a DMG magic item template or a blank spell scroll from the
+  // finished article without loading every document — see `data/enchant.mjs#mightBeTemplate`.
+  "system.properties", "system.identifier"
+]);
 
 /**
  * Session cache. Fetching every physical item across a dozen content packs takes a noticeable
@@ -45,6 +50,8 @@ export function clearIndexCache() {
  * @property {number} valueCp    List value in copper; 0 means unpriced.
  * @property {string} pack       Collection id of the pack it came from.
  * @property {string} packLabel  The pack's title, for the GM's source filter.
+ * @property {string[]} properties  The item's property keys ("mgc" for magical).
+ * @property {string} identifier    The system's `system.identifier`, or "".
  */
 
 /**
@@ -102,7 +109,9 @@ function toPoolEntry(entry) {
     rarity: normalizeRarity(entry.system?.rarity),
     valueCp: itemValueCp(entry.system?.price),
     pack,
-    packLabel: game.packs.get(pack)?.title ?? pack
+    packLabel: game.packs.get(pack)?.title ?? pack,
+    properties: [...(entry.system?.properties ?? [])].filter(p => typeof p === "string"),
+    identifier: typeof entry.system?.identifier === "string" ? entry.system.identifier : ""
   };
 }
 

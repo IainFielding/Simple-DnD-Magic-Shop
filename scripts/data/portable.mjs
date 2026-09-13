@@ -66,7 +66,16 @@ export function exportItem(source) {
   item._stats = origin ? { compendiumSource: origin } : {};
   if ( item.system && typeof item.system === "object" ) item.system.container = null;
 
-  item.flags = { ...(item.flags ?? {}), [MODULE_ID]: sanitizeLine(item.flags?.[MODULE_ID]) };
+  // What a made item was made from travels too, so an imported Longsword +1 still merges with the
+  // next one stocked rather than becoming a second line.
+  const madeFrom = item.flags?.[MODULE_ID]?.madeFrom;
+  item.flags = {
+    ...(item.flags ?? {}),
+    [MODULE_ID]: {
+      ...sanitizeLine(item.flags?.[MODULE_ID]),
+      ...(madeFrom && typeof madeFrom === "object" ? { madeFrom: sanitizeMadeFrom(madeFrom) } : {})
+    }
+  };
   return item;
 }
 
@@ -180,6 +189,15 @@ export function exportFileName(name) {
 }
 
 /* -------------------------------------------- */
+
+/** Only the string fields a made item records, so a hand-edited file cannot smuggle anything else in. */
+function sanitizeMadeFrom(raw) {
+  const out = {};
+  for ( const key of ["template", "profile", "base", "spell"] ) {
+    if ( typeof raw[key] === "string" && raw[key] ) out[key] = raw[key];
+  }
+  return out;
+}
 
 /** A purse with whole, non-negative coins of the standard denominations only. */
 function sanitizeCurrency(raw) {

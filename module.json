@@ -33,6 +33,7 @@
   "esmodules": [
     "scripts/main.mjs"
   ],
+  "socket": true,
   "styles": [
     "styles/fonts.css",
     "styles/shop.css",

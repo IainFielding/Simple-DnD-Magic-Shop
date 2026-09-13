@@ -193,13 +193,16 @@ export class ShopState {
   /*  Totals                                      */
   /* -------------------------------------------- */
 
-  /** Staged lines as the pricing helpers expect them: `{id, valueCp, qty}`. */
+  /**
+   * Staged lines as the pricing helpers expect them: `{id, valueCp, qty, fixed}`. `fixed` marks
+   * goods that trade at full value, which the helpers price at x1 whatever the multiplier.
+   */
   #basket(side) {
     const source = side === "take" ? this.context?.stock ?? [] : this.context?.pack ?? [];
     const map = this[side];
     return source
       .filter(line => map.has(line.id))
-      .map(line => ({ id: line.id, valueCp: line.valueCp, qty: map.get(line.id) }));
+      .map(line => ({ id: line.id, valueCp: line.valueCp, qty: map.get(line.id), fixed: !!line.fixed }));
   }
 
   /**

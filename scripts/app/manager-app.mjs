@@ -7,8 +7,8 @@ import {
   BUDGET_KEYS, budgetTotal, categoryCounts, defaultBudget, filterPool,
   rollTableStock, sanitizeBudget
 } from "../data/generate.mjs";
-import { itemPool, poolCounts, poolSources } from "../data/item-index.mjs";
-import { formatCp, priceMultipliers, pricesFor, totalCp } from "../data/pricing.mjs";
+import { poolCounts, poolSources } from "../data/item-index.mjs";
+import { formatCp, itemValueCp, priceMultipliers, pricesFor, totalCp } from "../data/pricing.mjs";
 import {
   createTrader, deleteTrader, duplicateTrader, getTrader, importTrader, listTraders, pruneRegistry
 } from "../data/registry.mjs";
@@ -16,9 +16,14 @@ import {
   FILTER_RARITIES, MUNDANE, cpToPriceParts, effectiveValueCp, parsePriceInput
 } from "../data/stock.mjs";
 import {
-  addStockItems, applyArchetype, clearLedger, gainSettings, getAttitude, ledgerOf, purse,
-  restockTrader, setAttitude, spendFor, stockEntries, stockFromRecipe, stockLine, traderData
+  addMadeStock, addStockItems, applyArchetype, clearLedger, gainSettings, getAttitude, ledgerOf, purse,
+  restockTrader, setAttitude, spendFor, stockEntries, stockFromRecipe, stockLine, stockPool, traderData
 } from "../data/trader.mjs";
+import {
+  enchantmentValueCp, isHollowTemplate, makeEnchantedData, makeScrollData, templateCatalogue,
+  templateChoices
+} from "../data/enchant.mjs";
+import { itemPool } from "../data/item-index.mjs";
 import {
   BUILT_IN_ARCHETYPES, archetypeFromTrader, budgetSummary, deleteArchetype, listArchetypes,
   recipeToGenerator, saveArchetype
@@ -31,6 +36,7 @@ import { ShopShellBase } from "./shell-base.mjs";
 import { yieldTakeoverTo } from "./takeover.mjs";
 import { ShopApp } from "./shop-app.mjs";
 import { postTraderCard } from "./chat-card.mjs";
+import { showToPlayers } from "./show.mjs";
 
 /**
  * The GM-facing Trader Manager: the one and only place Traders are created, stocked and
@@ -78,11 +84,14 @@ export class TraderManagerApp extends ShopShellBase {
       removeStock: TraderManagerApp.#onRemoveStock,
       openStockItem: TraderManagerApp.#onOpenStockItem,
       addFromCompendium: TraderManagerApp.#onAddFromCompendium,
+      makeMagicItem: TraderManagerApp.#onMakeMagicItem,
+      makeScroll: TraderManagerApp.#onMakeScroll,
       toggleGenerator: TraderManagerApp.#onToggleGenerator,
       generateStock: TraderManagerApp.#onGenerateStock,
       drawFromTable: TraderManagerApp.#onDrawFromTable,
       clearStock: TraderManagerApp.#onClearStock,
       postCard: TraderManagerApp.#onPostCard,
+      showToPlayers: TraderManagerApp.#onShowToPlayers,
       openShopAsGM: TraderManagerApp.#onOpenShopAsGM,
       restockNow: TraderManagerApp.#onRestockNow,
       resetAttitude: TraderManagerApp.#onResetAttitude,
@@ -498,7 +507,9 @@ export class TraderManagerApp extends ShopShellBase {
     const state = this.#generator;
     if ( !state.open ) return { open: false };
 
-    const pool = await itemPool();
+    // The generator's own pool, with DMG templates and blank scrolls swapped for what can really
+    // be made from them, so the counts beside each rarity are counts of things a run can produce.
+    const pool = await stockPool();
     const narrowing = {
       packs: state.packs,
       maxValueCp: parsePriceInput(state.maxValue, state.maxDenom) ?? 0
@@ -627,7 +638,150 @@ export class TraderManagerApp extends ShopShellBase {
 
     // The browser is a Foundry window opened from inside the fullscreen takeover, and closing
     // it hands focus back to us; nothing to lift here because it has already gone.
-    await this.#addUuids(trader, [...selected]);
+    //
+    // DMG templates are set aside and asked about one at a time; everything else goes in at once.
+    const plain = [];
+    const templates = [];
+    for ( const uuid of selected ) {
+      const item = await fromUuid(uuid).catch(() => null);
+      if ( item && isHollowTemplate(item) ) templates.push(item);
+      else plain.push(uuid);
+    }
+    if ( plain.length ) this.#reportAdded(await addStockItems(trader, plain, { synthesize: false }));
+    for ( const template of templates ) await this.#stockTemplate(trader, template);
+  }
+
+  /**
+   * The Stock tab's "Magic item…" button: choose any DMG template the world has, then what to make
+   * from it. The same chooser a dropped template opens, with the template picker shown as well.
+   */
+  static async #onMakeMagicItem() {
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+    ui.notifications.info(t("manager.enchant.loading"));
+    const templates = await templateCatalogue(await itemPool());
+    if ( !templates.length ) return void ui.notifications.warn(t("manager.enchant.noTemplates"));
+    await this.#stockTemplate(trader, null, templates);
+  }
+
+  /**
+   * The Stock tab's "Spell scroll…" button: pick spells in the system's compendium browser, and stock
+   * a scroll of each.
+   */
+  static async #onMakeScroll() {
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+    const browser = globalThis.dnd5e?.applications?.CompendiumBrowser;
+    if ( !browser?.select ) return void ui.notifications.warn(t("manager.generate.noBrowser"));
+    const selected = await browser.select({
+      filters: { locked: { documentClass: "Item", types: new Set(["spell"]) } },
+      selection: { min: 0, max: null }
+    });
+    if ( !selected?.size ) return;
+    const scrolls = [];
+    for ( const uuid of selected ) {
+      const data = await makeScrollData(uuid);
+      if ( data ) scrolls.push(data);
+    }
+    if ( !scrolls.length ) return void ui.notifications.warn(t("error.cannotScroll"));
+    this.#reportAdded({ ...(await addMadeStock(trader, scrolls)), rejected: [] });
+  }
+
+  /**
+   * Ask the GM what to make from a DMG template, and stock it.
+   *
+   * "Weapon, +1, +2, or +3" is three enchantments and forty weapons; the GM picks one of each and
+   * gets a real "Longsword +1" on the shelf. The base list follows the enchantment chosen, because
+   * each enchantment has its own rules about what it can go on.
+   * With a `catalogue`, the dialog also offers every template to choose from, and reloads the other
+   * two lists when the template changes.
+   * @param {object} trader
+   * @param {object|null} template  The dropped or picked template, or null to choose from the catalogue.
+   * @param {{uuid: string, name: string, packLabel: string}[]} [catalogue]
+   * @returns {Promise<boolean>}  Whether anything was stocked.
+   */
+  async #stockTemplate(trader, template, catalogue = null) {
+    const esc = foundry.utils.escapeHTML;
+    const load = async target => {
+      const { template: doc, choices } = await templateChoices(target);
+      return { doc, choices };
+    };
+    let current = await load(template ?? catalogue?.[0]?.uuid);
+    if ( !current.choices.length ) {
+      ui.notifications.warn(t("manager.enchant.noBases", { name: current.doc?.name ?? "" }));
+      return false;
+    }
+
+    const baseOptions = (state, choice) => {
+      const templateValueCp = itemValueCp(state.doc?.system?.price);
+      return choice.bases.map(b => {
+        const price = formatCp(b.valueCp + enchantmentValueCp({
+          profile: choice.profile, templateValueCp, consumable: b.type === "consumable"
+        }));
+        return `<option value="${b.uuid}">${esc(b.name)} — ${price}</option>`;
+      }).join("");
+    };
+    const profileOptions = state => state.choices.map(c => {
+      const rarity = c.profile.rarity ? ` (${t(`rarity.${c.profile.rarity}`)})` : "";
+      return `<option value="${c.profile.key}">${esc(c.profile.name || state.doc.name)}${rarity}</option>`;
+    }).join("");
+    const templatePicker = catalogue ? `<label>${t("manager.enchant.template")}
+        <select name="template">${catalogue.map(c => `<option value="${c.uuid}">${esc(c.name)}${c.packLabel ? ` — ${esc(c.packLabel)}` : ""}</option>`).join("")}</select>
+      </label>` : "";
+
+    const picked = await foundry.applications.api.DialogV2.prompt({
+      window: {
+        title: catalogue ? t("manager.enchant.titleAny") : t("manager.enchant.title", { name: current.doc.name }),
+        icon: "fa-solid fa-wand-sparkles"
+      },
+      classes: ["sogrom-shop-dialog"],
+      position: { width: 480 },
+      content: `<p>${t("manager.enchant.body")}</p>
+        <div class="shop-enchant-fields">
+          ${templatePicker}
+          <label>${t("manager.enchant.enchantment")}
+            <select name="profile">${profileOptions(current)}</select>
+          </label>
+          <label>${t("manager.enchant.base")}
+            <select name="base">${baseOptions(current, current.choices[0])}</select>
+          </label>
+        </div>`,
+      render: (_event, dialog) => {
+        const root = dialog.element;
+        const templateSelect = root.querySelector("[name=template]");
+        const profile = root.querySelector("[name=profile]");
+        const base = root.querySelector("[name=base]");
+        profile?.addEventListener("change", () => {
+          const choice = current.choices.find(c => c.profile.key === profile.value);
+          if ( choice && base ) base.innerHTML = baseOptions(current, choice);
+        });
+        templateSelect?.addEventListener("change", async () => {
+          const next = await load(templateSelect.value);
+          if ( !next.choices.length ) return;
+          current = next;
+          profile.innerHTML = profileOptions(current);
+          base.innerHTML = baseOptions(current, current.choices[0]);
+        });
+      },
+      ok: {
+        label: t("manager.enchant.add"),
+        icon: "fa-solid fa-plus",
+        callback: (_event, button) => ({
+          profileKey: button.form.elements.profile.value,
+          baseUuid: button.form.elements.base.value
+        })
+      },
+      rejectClose: false
+    });
+    if ( !picked ) return false;
+
+    const data = await makeEnchantedData({ template: current.doc, ...picked });
+    if ( !data ) {
+      ui.notifications.warn(t("manager.enchant.failed", { name: current.doc.name }));
+      return false;
+    }
+    this.#reportAdded({ ...(await addMadeStock(trader, [data])), rejected: [] });
+    return true;
   }
 
   /** Run the rarity-budget generator. */
@@ -709,12 +863,12 @@ export class TraderManagerApp extends ShopShellBase {
   /** Empty a Trader's shelves, with a confirmation — this is a lot of work to undo by hand. */
   static async #onClearStock() {
     const trader = getTrader(this.#selected);
-    if ( !trader || !trader.items.size ) return;
+    if ( !trader || !stockEntries(trader).length ) return;
 
     const proceed = await foundry.applications.api.DialogV2.confirm({
       window: { title: t("manager.stock.clearTitle"), icon: "fa-solid fa-trash-can" },
       content: `<p>${t("manager.stock.clearBody", {
-        count: trader.items.size, name: trader.name
+        count: stockEntries(trader).length, name: trader.name
       })}</p>`,
       rejectClose: false
     });
@@ -1098,8 +1252,21 @@ export class TraderManagerApp extends ShopShellBase {
 
     const item = await Item.implementation.fromDropData(data).catch(() => null);
     if ( !item ) return void ui.notifications.warn(t("manager.stock.dropNotItem"));
+
+    // A spell becomes a scroll of that spell, as it would in a character's inventory.
+    if ( item.type === "spell" ) {
+      const scroll = await makeScrollData(item);
+      if ( !scroll ) return void ui.notifications.warn(t("manager.stock.dropNotPhysical", { name: item.name }));
+      this.#reportAdded({ ...(await addMadeStock(trader, [scroll])), rejected: [] });
+      return;
+    }
     if ( !PHYSICAL_TYPES.includes(item.type) ) {
       return void ui.notifications.warn(t("manager.stock.dropNotPhysical", { name: item.name }));
+    }
+    // A DMG template asks what to make from it.
+    if ( isHollowTemplate(item) ) {
+      await this.#stockTemplate(trader, item);
+      return;
     }
 
     // Routed through the same function the picker, the generator and the API use, rather than
@@ -1107,7 +1274,7 @@ export class TraderManagerApp extends ShopShellBase {
     // two things that one does: recording where the item came from (without which a receipt has
     // nothing durable to link) and raising an existing line instead of adding a second row for
     // the same thing.
-    const { created, raised } = await addStockItems(trader, [item.uuid]);
+    const { created, raised } = await addStockItems(trader, [item.uuid], { synthesize: false });
     const landed = created[0] ?? raised[0];
     if ( !landed ) return void ui.notifications.warn(t("manager.stock.dropNotItem"));
 
@@ -1218,6 +1385,30 @@ export class TraderManagerApp extends ShopShellBase {
   }
 
   /**
+   * Open the selected Trader's shop on every connected player's screen, and say who got it.
+   */
+  static async #onShowToPlayers() {
+    const trader = getTrader(this.#selected);
+    if ( !trader ) return;
+    if ( !game.users.some(u => u.active && !u.isGM) ) {
+      return void ui.notifications.warn(t("manager.show.nobody"));
+    }
+    try {
+      const { opened, skipped } = await showToPlayers(trader.id);
+      if ( opened.length ) {
+        ui.notifications.info(t("manager.show.opened", { name: trader.name, players: opened.join(", ") }));
+      }
+      if ( skipped.length ) {
+        ui.notifications.warn(t("manager.show.skipped", {
+          players: skipped.map(x => `${x.name} (${t(`manager.show.reason.${x.reason}`)})`).join(", ")
+        }));
+      }
+    } catch ( err ) {
+      ui.notifications.warn(err.message);
+    }
+  }
+
+  /**
    * Open the shop as the GM, to see what the players will see.
    *
    * Opens against the GM's own assigned character when they have one, because the whole window
@@ -1252,6 +1443,7 @@ export class TraderManagerApp extends ShopShellBase {
     if ( !trader || !characterId ) return;
     await trader.unsetFlag(MODULE_ID, `attitude.${characterId}`);
     await trader.unsetFlag(MODULE_ID, `spend.${characterId}`);
+    await trader.unsetFlag(MODULE_ID, `haggle.${characterId}`);
     this.render({ parts: ["pane"] });
   }
 

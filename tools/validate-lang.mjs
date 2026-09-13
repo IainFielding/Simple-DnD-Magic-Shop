@@ -43,7 +43,11 @@ const DYNAMIC_PREFIXES = [
   // archetype.builtIn.<id>.name/.hint, built in data/archetypes.mjs for each built-in archetype
   "archetype.builtIn",
   // error.import.<reason>, from parseTraderExport()'s error keys
-  "error.import"
+  "error.import",
+  // haggle.edge.<advantage|disadvantage>, from haggleEdge() in the shop's haggle dialog
+  "haggle.edge",
+  // manager.show.reason.<reason>, from the show-to-players query's answers
+  "manager.show.reason"
 ];
 
 /** Every file we scan for key references. */

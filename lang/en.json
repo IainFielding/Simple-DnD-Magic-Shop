@@ -43,6 +43,18 @@
       "debug": {
         "name": "Debug logging",
         "hint": "Write this module's diagnostics to the browser console. Useful when reporting a problem."
+      },
+      "haggleSuccess": {
+        "name": "Attitude a good haggle earns",
+        "hint": "How far a Trader warms to a character who passes a haggle check. Set to 0 to make haggling risk-only."
+      },
+      "haggleFailure": {
+        "name": "Attitude a bad haggle costs",
+        "hint": "How far a Trader cools toward a character who fails a haggle check. Set to 0 for no penalty beyond the day's lockout."
+      },
+      "fixedValueGoods": {
+        "name": "Gems and art trade at full value",
+        "hint": "Gemstones, art objects and trade goods are as good as coin: Traders buy and sell them at their listed value whatever the character's Charisma or the Trader's attitude, and they earn no goodwill."
       }
     },
     "sceneControl": {
@@ -233,6 +245,33 @@
         "emptyBody": "Every deal struck with this Trader will be recorded here.",
         "clearTitle": "Clear the ledger",
         "clearBody": "Forget every trade <strong>{name}</strong> has recorded? Receipts already in chat stay where they are."
+      },
+      "enchant": {
+        "title": "Make a magic item: {name}",
+        "body": "This is a template from the Dungeon Master's Guide. Choose the enchantment and the item it goes on, and the Trader will stock the finished item.",
+        "enchantment": "Enchantment",
+        "base": "Base item",
+        "add": "Add to stock",
+        "noBases": "{name} is a template, but none of the system's base items fit it, so nothing could be made.",
+        "failed": "{name} could not be made into an item.",
+        "button": "Magic item…",
+        "scrollButton": "Spell scroll…",
+        "titleAny": "Make a magic item",
+        "template": "Magic item",
+        "loading": "Finding the magic items your compendiums can make…",
+        "noTemplates": "None of your enabled compendiums has a magic item template to make from. The Dungeon Master's Guide has them."
+      },
+      "show": {
+        "button": "Show to players",
+        "nobody": "No players are connected.",
+        "opened": "{name} is open on the screens of: {players}.",
+        "skipped": "Not shown to: {players}.",
+        "reason": {
+          "gm": "a GM",
+          "noCharacter": "no assigned character",
+          "refused": "the shop would not open",
+          "noAnswer": "no answer"
+        }
       }
     },
     "attitude": {
@@ -318,7 +357,22 @@
       "history": "Your dealings with this trader",
       "historyHeading": "Your dealings",
       "historyCount": "{count} recorded",
-      "historyEmpty": "You have not traded here yet."
+      "historyEmpty": "You have not traded here yet.",
+      "equipped": "Equipped",
+      "attuned": "Attuned",
+      "loseStatus": "{status} now; it will not be when sold.",
+      "breakdown": {
+        "caption": "Where the price comes from",
+        "listValue": "List value",
+        "fullValue": "Gem, art or trade good: full value",
+        "charisma": "Charisma {mod}",
+        "attitude": "Attitude {value} ({tier})",
+        "adjusted": "Adjusted by a house rule",
+        "youPay": "You pay",
+        "theyPay": "They pay",
+        "favour": "Favour",
+        "each": "Each"
+      }
     },
     "card": {
       "eyebrow": "A trader is open for business",
@@ -368,7 +422,16 @@
         "noName": "That export has no Trader name, so it cannot be imported.",
         "failed": "The Trader could not be created.",
         "unreadable": "That file could not be read."
-      }
+      },
+      "tradeFailed": "Something went wrong partway through, so the trade was undone. Nothing changed hands.",
+      "tradeFailedPartial": "Something went wrong partway through and the trade could not be fully undone. Your GM has been told.",
+      "rollbackIncomplete": "A trade between {actor} and {trader} failed partway and could not be fully undone. Check by hand: {parts}.",
+      "haggleSkill": "That is not a way to haggle.",
+      "haggleLocked": "You have already tried {skill} with them today.",
+      "haggleRefused": "They will not hear it right now.",
+      "haggleNoRoll": "The check could not be rolled.",
+      "cannotEnchant": "That enchantment cannot go on that item.",
+      "cannotScroll": "A scroll could not be made from that."
     },
     "archetype": {
       "builtIn": {
@@ -407,6 +470,23 @@
       "paid": "Paid",
       "received": "Received",
       "goodwill": "+{points} attitude"
+    },
+    "haggle": {
+      "button": "Haggle",
+      "allTried": "You have tried every approach today. Try again tomorrow.",
+      "title": "Haggle with {trader}",
+      "intro": "Talk them round. Pick how you make your case; the check is rolled for everyone to see.",
+      "terms": "DC {dc}. Success: +{gain} attitude. Failure: −{loss}, and you cannot try that approach again until tomorrow.",
+      "edge": {
+        "advantage": "They like you: you roll with advantage.",
+        "disadvantage": "They dislike you: you roll with disadvantage."
+      },
+      "skill": "Approach",
+      "locked": "tried today",
+      "roll": "Make the check",
+      "flavor": "Haggling with {trader}",
+      "success": "{total} against DC {dc}: they warm to you ({change} attitude).",
+      "failure": "{total} against DC {dc}: they are not persuaded ({change} attitude)."
     }
   }
 }

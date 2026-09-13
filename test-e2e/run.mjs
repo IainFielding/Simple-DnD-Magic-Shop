@@ -81,6 +81,10 @@ try {
   const trades = await gm.inWorld("trade.mjs", "all");
   failed += report(trades, only);
 
+  // Rollback, item state, full-value goods, DMG magic items and haggling.
+  const features = await gm.inWorld("features.mjs", "all");
+  failed += report(features, only);
+
   // The API and the hook surface: docs/API.md is a promise to other module authors, and this is
   // what stops it rotting.
   const api = await gm.inWorld("api.mjs", "all");
@@ -243,6 +247,62 @@ async function crossClientChecks(gm, players) {
     await player.inWorld("cross.mjs", "closeShopsAsPlayer");
   }
 
+  /* --- Showing a Trader to everyone at once --- */
+  const shown = await gm.inWorld("features.mjs", "showToPlayers", { traderId });
+  const names = PLAYERS.map(p => p.name);
+  check("Show to players opens the shop for every connected player",
+    names.every(n => shown.opened.includes(n)), JSON.stringify(shown));
+  for ( const session of players ) {
+    const open = await session.inWorld("cross.mjs", "shopOpenFor", { traderId });
+    check(`and ${session.userName}'s client has it open`, open.open, JSON.stringify(open));
+    await session.inWorld("cross.mjs", "closeShopsAsPlayer");
+  }
+
+  /* --- A player haggling, rolled on the GM's client --- */
+  const me = await player.inWorld("cross.mjs", "whoAmI");
+  await gm.inWorld("features.mjs", "holdDice", { face: 20 });
+  const haggled = await player.inWorld("cross.mjs", "haggleAsPlayer", { traderId, skill: "prf" });
+  check("a player can haggle through the GM", haggled.ok && haggled.outcome?.success === true,
+    JSON.stringify(haggled));
+  const forged = await player.inWorld("cross.mjs", "haggleAsPlayer", { traderId, skill: "per", actorId: me.other });
+  check("and cannot haggle as someone else's character",
+    !forged.ok && /not your character/i.test(forged.error ?? ""), JSON.stringify(forged));
+  await gm.inWorld("features.mjs", "releaseDice");
+
   await gm.inWorld("cross.mjs", "cleanupSharedTrader", { traderId });
+
+  /* --- A GM with the game open twice --- */
+  await twoTabCheck(gm, player, me.characterName, check);
   return failures;
+}
+
+/**
+ * A GM with two tabs open: Foundry delivers a player's trade to both, and only one may settle it.
+ *
+ * Opens a second session as the same GM, lets the two tabs find each other, and has a player buy one
+ * torch. Without the claim, both tabs settled it and the player walked away with two.
+ */
+async function twoTabCheck(gm, player, characterName, check) {
+  let second = null;
+  try {
+    second = await Session.open();
+    // The tabs greet each other at `ready`; give the greeting a moment to cross the server.
+    await gm.page.waitForTimeout(1500);
+    const { traderId, itemId } = await gm.inWorld("features.mjs", "makeTwoTabTrader");
+    const bought = await player.inWorld("cross.mjs", "buyAsPlayer", { traderId, itemId, qty: 1 });
+    check("a player's purchase goes through with the GM in two tabs", bought.ok, JSON.stringify(bought));
+    await gm.page.waitForTimeout(1500);
+    const state = await gm.inWorld("features.mjs", "readTwoTabTrader", { traderId, characterName });
+    check("the two GM tabs know about each other", state.siblings === true, JSON.stringify(state));
+    check("the torch was taken off the shelf once", state.shelf === 4, JSON.stringify(state));
+    check("the trade was recorded once", state.ledger === 1, JSON.stringify(state));
+    check("and the player holds exactly one torch", state.held === 1, JSON.stringify(state));
+    await gm.inWorld("features.mjs", "cleanupTwoTab", { traderId, characterName });
+    const errors = second.errors();
+    check("the second GM tab logged no errors", !errors.length, errors.slice(0, 3).join(" | "));
+  } catch ( err ) {
+    check("the two-tab check ran", false, err.message);
+  } finally {
+    await second?.close().catch(() => {});
+  }
 }

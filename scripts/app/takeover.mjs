@@ -61,15 +61,21 @@ function takeoverRoot() {
  * Whether a rendered application is someone else's window that the takeover would otherwise
  * bury.
  *
- * Deliberately narrow. `renderApplicationV2` fires for *every* ApplicationV2 in the world — the
- * hook dispatcher walks the whole inheritance chain — so this filters down to framed windows
- * that actually represent a document, and skips our own shells, which would otherwise be asked
- * to float above themselves.
+ * Narrow on shape, not on purpose. `renderApplicationV2` fires for *every* ApplicationV2 in the
+ * world — the hook dispatcher walks the whole inheritance chain — so this filters down to framed
+ * windows, and skips our own shells, which would otherwise be asked to float above themselves.
+ *
+ * It used to demand a document as well, and that buried every **dialog** opened from inside a
+ * full-screen window: a confirmation, the enchantment chooser, the compendium browser. None of
+ * them is a document sheet, so each opened at a z-index in the low hundreds, underneath the
+ * takeover, waiting for a click nobody could make. Only a window that *opens* while the takeover
+ * is up is raised (see {@link watchForeignWindows}), so widening this cannot lift a sheet that was
+ * already open behind the shop.
  * @param {object} application
  * @returns {boolean}
  */
 export function isForeignWindow(application) {
-  if ( !application?.document ) return false;             // not a document sheet
+  if ( !application ) return false;
   if ( application.hasFrame === false ) return false;     // an unframed overlay, not a window
   // Our own shells are ApplicationV2 too; they carry `sogrom-shop` from DEFAULT_OPTIONS.
   return !application.element?.classList?.contains("sogrom-shop");

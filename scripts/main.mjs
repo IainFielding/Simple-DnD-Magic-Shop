@@ -20,6 +20,7 @@ import { registerChatCard } from "./app/chat-card.mjs";
 import { watchForeignWindows } from "./app/takeover.mjs";
 import { ShopApp } from "./app/shop-app.mjs";
 import { registerQueries } from "./trade/queries.mjs";
+import { claim, greet, registerClaims } from "./trade/claim.mjs";
 import { sweepRestocks } from "./data/trader.mjs";
 import { registerApi } from "./api.mjs";
 // Imported for its side effect: the file declares the shop-context query at module scope.
@@ -28,6 +29,10 @@ import { registerApi } from "./api.mjs";
 import "./trade/context.mjs";
 // Likewise: declares the trade query, which is the only path that moves goods or coin.
 import "./trade/transaction.mjs";
+// The haggle check, rolled on the GM's client.
+import "./trade/haggle.mjs";
+// The query a GM sends to open a shop on every player's screen at once.
+import "./app/show.mjs";
 
 /* -------------------------------------------- */
 /*  Init: settings, templates, helpers          */
@@ -39,6 +44,9 @@ Hooks.once("init", () => {
   // The GM-side query handlers. Installed at `init` so a GM client is answering before any
   // player's `ready` can fire and open a shop from a card already in the log.
   registerQueries();
+  // Listen for sibling tabs of the same user, so a GM with the game open twice settles each trade
+  // once. See trade/claim.mjs.
+  registerClaims();
   registerChatCard();
   // Open shops re-ask the GM when either side of the counter changes, so nobody shops from a
   // shelf another player has already emptied.
@@ -143,6 +151,24 @@ function registerSettings() {
     scope: "world", config: true, type: Number, default: DEFAULTS.attitudeGainCap,
     range: { min: 0, max: 25, step: 1 }
   });
+  game.settings.register(MODULE_ID, SETTINGS.haggleSuccess, {
+    name: t("settings.haggleSuccess.name"),
+    hint: t("settings.haggleSuccess.hint"),
+    scope: "world", config: true, type: Number, default: DEFAULTS.haggleSuccess,
+    range: { min: 0, max: 25, step: 1 }
+  });
+  game.settings.register(MODULE_ID, SETTINGS.haggleFailure, {
+    name: t("settings.haggleFailure.name"),
+    hint: t("settings.haggleFailure.hint"),
+    scope: "world", config: true, type: Number, default: DEFAULTS.haggleFailure,
+    range: { min: 0, max: 25, step: 1 }
+  });
+
+  game.settings.register(MODULE_ID, SETTINGS.fixedValueGoods, {
+    name: t("settings.fixedValueGoods.name"),
+    hint: t("settings.fixedValueGoods.hint"),
+    scope: "world", config: true, type: Boolean, default: DEFAULTS.fixedValueGoods
+  });
 
   /* --- Presentation ------------------------------------------------------ */
 
@@ -224,10 +250,15 @@ Hooks.once("ready", () => {
   // table with two GMs would otherwise sweep twice on the same tick: the writes are idempotent,
   // but the `restocked` hook firing twice is not, and nor is a doubled announcement.
   // `activeGM` designates exactly one, deterministically.
-  Hooks.on("updateWorldTime", worldTime => {
+  //
+  // `activeGM` names a user, though, and a GM with two tabs open is the active GM in both — so the
+  // sweep is also claimed, the same way a trade is, and only one of those tabs runs it.
+  Hooks.on("updateWorldTime", async worldTime => {
     if ( game.users.activeGM?.id !== game.user.id ) return;
+    if ( !(await claim(`restock:${worldTime}`)) ) return;
     sweepRestocks(worldTime).catch(err => log("restock sweep failed", err));
   });
+  greet();
 
   const api = registerApi();
   fireHook(HOOKS.ready, { api, version: game.modules.get(MODULE_ID)?.version ?? "" });

@@ -55,7 +55,10 @@
           the Trader *buys* your goods at the sell multiplier and *sells* to you at the buy
           multiplier. `multipliers.buy`/`sell` are named from the character's side everywhere in
           the code, so they cross over here — deliberately, not by mistake. --}}
-    <p class="shop-rate">
+    {{!-- Hover for the breakdown: Charisma and attitude, term by term, and what they make each side
+          pay. Rendered as dnd5e's own attribution table. --}}
+    <p class="shop-rate" {{#if rateTooltip}}data-tooltip="{{rateTooltip}}" data-tooltip-class="property-attribution"{{/if}}
+       tabindex="0">
       {{localize "sogrom-simple-dnd5e-magic-shop.shop.rate"
          buy=multipliers.sellLabel sell=multipliers.buyLabel}}
     </p>
@@ -70,6 +73,14 @@
   </div>
 
   <div class="shop-topbar-tools">
+    {{!-- Talk the Trader round: a Charisma check the GM's client rolls. Disabled once every
+          approach has been tried and failed today. --}}
+    <button type="button" class="shop-btn shop-haggle" data-action="haggle"
+            {{#unless canHaggle}}disabled data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.haggle.allTried'}}"{{/unless}}
+            {{#if settling}}disabled{{/if}}>
+      <i class="fa-solid fa-comments" aria-hidden="true"></i>
+      {{localize "sogrom-simple-dnd5e-magic-shop.haggle.button"}}
+    </button>
     {{!-- This character's past dealings with this Trader, shown in place of the counter. --}}
     <button type="button" class="shop-icon-btn {{#if showHistory}}is-on{{/if}}" data-action="toggleHistory"
             aria-pressed="{{#if showHistory}}true{{else}}false{{/if}}"
