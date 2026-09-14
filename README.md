@@ -26,7 +26,8 @@ sides, and the Trader's purse can run dry.
 
 - **Traders are Actors the module owns.** Stock is real dnd5e items, so prices, rarity,
   attunement and tooltips all come for free, and quantity is just the item's own quantity.
-  A Trader holds up to 150 different items; a stack of anything counts once.
+  A Trader holds up to 150 different items by default (a world setting, up to 300); a stack of
+  anything counts once.
 - **Attitude, 0 to 100, per character per Trader.** It moves prices, and it gates stock a Trader
   will only show once it trusts you. It drifts up as a character spends, and the GM can set it
   directly.
@@ -47,6 +48,9 @@ sides, and the Trader's purse can run dry.
   Trader Manager, and a player's shop shows them their own dealings with that Trader.
 - **Archetypes.** Start a Trader as a Blacksmith, Apothecary, Arcanist, Fence or one of the other
   built-ins, stock its shelves in the same click, or save your own Trader as an archetype.
+- **Stock a whole folder at once.** Drop a folder from a compendium or the Items sidebar, or a
+  whole compendium, on the Trader Manager and everything in it, subfolders included, goes on the
+  shelves after one confirmation.
 - **Export and import.** Download a Trader, stock and all, and import it into another world. What
   it thinks of your players, and its ledger, stay behind.
 - **Real magic items.** The Dungeon Master's Guide ships "Weapon, +1, +2, or +3" and Flame Tongue

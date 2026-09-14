@@ -12,8 +12,8 @@
  */
 
 import {
-  MAX_STOCK_LINES, MODULE_ID, SETTINGS, DEFAULTS, DISPLAY_MODES, PRICING_PRESETS, HOOKS,
-  ATTITUDE_MIN, ATTITUDE_MAX, fireHook, tpl, t, log, setting
+  MODULE_ID, SETTINGS, DEFAULTS, DISPLAY_MODES, PRICING_PRESETS, HOOKS, STOCK_LINES,
+  ATTITUDE_MIN, ATTITUDE_MAX, fireHook, maxStockLines, tpl, t, log, setting
 } from "./config.mjs";
 import { TraderManagerApp } from "./app/manager-app.mjs";
 import { registerChatCard } from "./app/chat-card.mjs";
@@ -64,8 +64,9 @@ Hooks.once("init", () => {
   Hooks.on("preCreateItem", (item, _data, options) => {
     const actor = item.parent;
     if ( !isTrader(actor) || !isStockItem(item) || options?.[MODULE_ID]?.restoring ) return;
-    if ( stockEntries(actor).length < MAX_STOCK_LINES ) return;
-    ui.notifications.warn(t("manager.stock.full", { count: 1, max: MAX_STOCK_LINES }));
+    const max = maxStockLines();
+    if ( stockEntries(actor).length < max ) return;
+    ui.notifications.warn(t("manager.stock.full", { count: 1, max }));
     return false;
   });
 
@@ -180,6 +181,20 @@ function registerSettings() {
     name: t("settings.fixedValueGoods.name"),
     hint: t("settings.fixedValueGoods.hint"),
     scope: "world", config: true, type: Boolean, default: DEFAULTS.fixedValueGoods
+  });
+
+  /* --- Stock ------------------------------------------------------------- */
+
+  // Lowering it never removes stock: a Trader over the new limit keeps what it has and takes no new
+  // lines until it is under (see `data/stock.mjs#stockRoom`).
+  game.settings.register(MODULE_ID, SETTINGS.maxStockLines, {
+    name: t("settings.maxStockLines.name"),
+    hint: t("settings.maxStockLines.hint"),
+    scope: "world", config: true, type: Number, default: DEFAULTS.maxStockLines,
+    range: { min: STOCK_LINES.min, max: STOCK_LINES.max, step: STOCK_LINES.step },
+    // Open shops already re-ask on any change to one of our settings; the manager's "x of y lines"
+    // and its full-shelf note need a nudge of their own.
+    onChange: () => foundry.applications.instances.get(`${MODULE_ID}-manager`)?.render()
   });
 
   /* --- Presentation ------------------------------------------------------ */

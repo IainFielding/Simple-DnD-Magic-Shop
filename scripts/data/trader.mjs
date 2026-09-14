@@ -1,5 +1,5 @@
 import {
-  HOOKS, MAX_STOCK_LINES, MODULE_ID, PHYSICAL_TYPES, SETTINGS, fireCancellableHook, fireHook, log, setting
+  HOOKS, MODULE_ID, PHYSICAL_TYPES, SETTINGS, fireCancellableHook, fireHook, log, maxStockLines, setting
 } from "../config.mjs";
 import { clampAttitude, emptySpend, recordSpend, sanitizeSpend, adjustAttitude } from "./attitude.mjs";
 import { lockHaggle, sanitizeHaggleRecord } from "./haggle.mjs";
@@ -411,7 +411,7 @@ export function addMadeStock(actor, data, options = {}) {
  * @param {object} [options]
  * @param {number} [options.qty]
  * @param {object} [options.line]
- * Stops at {@link MAX_STOCK_LINES}. What is already stocked is still raised when the shelf is full —
+ * Stops at the world's stock limit ({@link maxStockLines}). What is already stocked is still raised when the shelf is full —
  * that takes no room — and what would need a new line is reported in `full` rather than created.
  * @returns {Promise<{created: object[], raised: object[], failed: string[], full: string[]}>}
  */
@@ -518,7 +518,7 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
   }
 
   logTrader(actor, `stock added: ${created.length} new, ${raised.length} raised, ${failed.length} refused, `
-    + `${full.length} over the ${MAX_STOCK_LINES}-line limit`);
+    + `${full.length} over the ${maxStockLines()}-line limit`);
   return { created, raised, failed, full };
 }
 

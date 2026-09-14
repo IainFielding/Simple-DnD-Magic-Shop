@@ -17,16 +17,18 @@
 export const MODULE_ID = "sogrom-simple-dnd5e-magic-shop";
 
 /**
- * The most stock lines one Trader may hold — distinct items on its shelves, not their quantities: a
- * stack of twenty arrows is one line.
+ * The bounds of the world's stock limit: the most lines one Trader may hold — distinct items on its
+ * shelves, not their quantities: a stack of twenty arrows is one line. The GM picks the limit with
+ * a slider; read it through {@link maxStockLines}, never the setting directly.
  *
  * Every line is an embedded item on the Trader actor, and Foundry sends the whole actor to every
- * client and re-sends it on every change. A shop of hundreds of lines makes each purchase heavier
- * for the whole table and fills a shelf no player can take in anyway. Enforced on every route in:
- * the manager, the generator, roll tables, the API, import, a character selling something new, and
- * an item dropped straight onto the Trader's actor sheet.
+ * client and re-sends it on every change. A real magic item is about 5 KB, so 300 lines is about
+ * 1.5 MB per Trader for every player's browser, and a world past ~220 lines has been seen to stop
+ * placing tokens. The ceiling stays at 300 for that reason. Enforced on every route in: the manager,
+ * the generator, roll tables, the API, import, a character selling something new, and an item
+ * dropped straight onto the Trader's actor sheet.
  */
-export const MAX_STOCK_LINES = 150;
+export const STOCK_LINES = { min: 10, max: 300, step: 10, default: 150 };
 
 /** The dnd5e item types a Trader can stock: priced physical gear. Mirrors the system's own list. */
 export const PHYSICAL_TYPES = ["weapon", "equipment", "consumable", "tool", "container", "loot"];
@@ -241,6 +243,8 @@ export const SETTINGS = {
   haggleSuccess: "haggleSuccess",
   /** Attitude a failed haggle check costs. */
   haggleFailure: "haggleFailure",
+  /** The most stock lines one Trader may hold. Read it through {@link maxStockLines}. */
+  maxStockLines: "maxStockLines",
   debug: "debugLogging"
 };
 
@@ -309,6 +313,7 @@ export const DEFAULTS = {
   // on the same scale rather than letting one make the other pointless.
   haggleSuccess: 5,
   haggleFailure: 5,
+  maxStockLines: STOCK_LINES.default,
   debug: false
 };
 
@@ -339,6 +344,19 @@ export function setting(key) {
   } catch {
     return DEFAULTS[key];
   }
+}
+
+/**
+ * The most stock lines one Trader may hold, as the GM has set it.
+ *
+ * Clamped and whole, because the slider is not the only way in: `game.settings.set` from the
+ * console takes any value, and a limit of 5000 or "abc" must not reach the routes that enforce it.
+ * @returns {number}
+ */
+export function maxStockLines() {
+  const value = Number(setting(SETTINGS.maxStockLines));
+  if ( !Number.isFinite(value) ) return STOCK_LINES.default;
+  return Math.floor(clamp(value, STOCK_LINES.min, STOCK_LINES.max));
 }
 
 /**

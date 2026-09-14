@@ -1,5 +1,5 @@
 import {
-  MAX_STOCK_LINES, MODULE_ID, PHYSICAL_TYPES, PRICING_PRESETS, SETTINGS, normalizeRarity, setting, tpl, t, log
+  MODULE_ID, PHYSICAL_TYPES, PRICING_PRESETS, SETTINGS, maxStockLines, normalizeRarity, setting, tpl, t, log
 } from "../config.mjs";
 import { attitudeTier } from "../data/attitude.mjs";
 import { RESTOCK_MODES, daysUntilRestock } from "../data/restock.mjs";
@@ -13,8 +13,9 @@ import {
   createTrader, deleteTrader, duplicateTrader, getTrader, importTrader, listTraders, pruneRegistry
 } from "../data/registry.mjs";
 import {
-  FILTER_RARITIES, MUNDANE, cpToPriceParts, effectiveValueCp, parsePriceInput
+  FILTER_RARITIES, MUNDANE, cpToPriceParts, effectiveValueCp, parsePriceInput, stockRoom
 } from "../data/stock.mjs";
+import { droppedFolderItems, sortDropped } from "../data/folder-drop.mjs";
 import {
   addMadeStock, addStockItems, applyArchetype, clearLedger, gainSettings, getAttitude, ledgerOf, purse,
   restockTrader, setAttitude, spendFor, stockEntries, stockFromRecipe, stockLine, stockPool, traderData
@@ -232,7 +233,7 @@ export class TraderManagerApp extends ShopShellBase {
       img: actor.img,
       active: actor.id === this.#selected,
       stockCount: entries.length,
-      maxLines: MAX_STOCK_LINES,
+      maxLines: maxStockLines(),
       purse: formatCp(this.#purseCp(actor))
     };
   }
@@ -603,8 +604,8 @@ export class TraderManagerApp extends ShopShellBase {
       rows,
       hasRows: rows.length > 0,
       lineCount: rows.length,
-      maxLines: MAX_STOCK_LINES,
-      isFull: rows.length >= MAX_STOCK_LINES,
+      maxLines: maxStockLines(),
+      isFull: rows.length >= maxStockLines(),
       // Worded from the Trader's side, matching the column: it buys at the character's sell
       // multiplier and sells at their buy multiplier.
       previewNote: t("manager.stock.previewNote", {
@@ -848,7 +849,7 @@ export class TraderManagerApp extends ShopShellBase {
       created: created.length, raised: raised.length
     }));
     if ( full.length ) {
-      ui.notifications.warn(t("manager.stock.full", { count: full.length, max: MAX_STOCK_LINES }));
+      ui.notifications.warn(t("manager.stock.full", { count: full.length, max: maxStockLines() }));
     }
     if ( rejected.length ) {
       // Overwhelmingly a roll table that also rolls spells or features. Naming them beats a bare
@@ -1255,6 +1256,7 @@ export class TraderManagerApp extends ShopShellBase {
     } catch {
       data = null;
     }
+    if ( (data?.type === "Folder") || (data?.type === "Compendium") ) return this.#stockFolder(trader, data);
     if ( data?.type !== "Item" ) return;
 
     const item = await Item.implementation.fromDropData(data).catch(() => null);
@@ -1282,7 +1284,7 @@ export class TraderManagerApp extends ShopShellBase {
     // nothing durable to link) and raising an existing line instead of adding a second row for
     // the same thing.
     const { created, raised, full } = await addStockItems(trader, [item.uuid], { synthesize: false });
-    if ( full.length ) return void ui.notifications.warn(t("manager.stock.full", { count: 1, max: MAX_STOCK_LINES }));
+    if ( full.length ) return void ui.notifications.warn(t("manager.stock.full", { count: 1, max: maxStockLines() }));
     const landed = created[0] ?? raised[0];
     if ( !landed ) return void ui.notifications.warn(t("manager.stock.dropNotItem"));
 
@@ -1291,6 +1293,68 @@ export class TraderManagerApp extends ShopShellBase {
     }
     this.#tab = "stock";
     this.render({ parts: ["rail", "pane"] });
+  }
+
+  /**
+   * A folder, or a whole pack, dropped on the window: everything in it joins the stock.
+   *
+   * Asks first, saying how many and what will be left out, because a pack of three hundred things
+   * is a lot to take back off the shelves one line at a time.
+   * @param {object} trader
+   * @param {object} data  Drop data of type "Folder" or "Compendium".
+   */
+  async #stockFolder(trader, data) {
+    ui.notifications.info(t("manager.stock.dropFolderLoading"));
+    const dropped = await droppedFolderItems(data).catch(err => {
+      log("could not read the dropped folder", err);
+      return null;
+    });
+    if ( !dropped ) return void ui.notifications.warn(t("manager.stock.dropFolderNotItems"));
+
+    const { plain, spells, templates, skipped } = sortDropped(dropped.items);
+    const esc = foundry.utils.escapeHTML;
+    const count = plain.length + spells.length;
+    if ( !count ) return void ui.notifications.warn(t("manager.stock.dropFolderEmpty", { name: dropped.name }));
+
+    const room = stockRoom(stockEntries(trader).length);
+    const notes = [
+      spells.length && t("manager.stock.dropFolderScrolls", { count: spells.length }),
+      templates.length && t("manager.stock.dropFolderTemplates", { count: templates.length }),
+      skipped.length && t("manager.stock.dropFolderSkipped", { count: skipped.length }),
+      (count > room) && t("manager.stock.dropFolderRoom", { room, max: maxStockLines() })
+    ].filter(Boolean);
+    const proceed = await foundry.applications.api.DialogV2.confirm({
+      window: { title: t("manager.stock.dropFolderTitle"), icon: "fa-solid fa-folder-open" },
+      classes: ["sogrom-shop-dialog"],
+      content: `<p>${t("manager.stock.dropFolderBody", { count, name: esc(dropped.name), trader: esc(trader.name) })}</p>
+        ${notes.map(note => `<p>${note}</p>`).join("")}`
+    });
+    if ( !proceed ) return;
+
+    const result = plain.length
+      ? await addStockItems(trader, plain.map(item => item.uuid), { synthesize: false })
+      : { created: [], raised: [], failed: [], rejected: [], full: [] };
+
+    if ( spells.length ) {
+      // Only as many scrolls as there is still room for. Each one is a whole item built from the
+      // spell, so making three hundred to keep a few would be a long wait for nothing.
+      const fits = spells.slice(0, stockRoom(stockEntries(trader).length));
+      result.full.push(...spells.slice(fits.length).map(spell => spell.uuid));
+      const scrolls = [];
+      for ( const spell of fits ) {
+        const scroll = await makeScrollData(spell);
+        if ( scroll ) scrolls.push(scroll);
+        else result.rejected.push({ uuid: spell.uuid, name: spell.name, type: spell.type });
+      }
+      if ( scrolls.length ) {
+        const made = await addMadeStock(trader, scrolls);
+        result.created.push(...made.created);
+        result.raised.push(...made.raised);
+        result.failed.push(...made.failed);
+        result.full.push(...made.full);
+      }
+    }
+    this.#reportAdded(result);
   }
 
   /* -------------------------------------------- */
@@ -1595,7 +1659,7 @@ export class TraderManagerApp extends ShopShellBase {
     this.#selected = actor.id;
     this.#tab = "identity";
     ui.notifications.info(t("manager.import.done", { name: actor.name, count: items }));
-    if ( dropped ) ui.notifications.warn(t("manager.import.dropped", { count: dropped, max: MAX_STOCK_LINES }));
+    if ( dropped ) ui.notifications.warn(t("manager.import.dropped", { count: dropped, max: maxStockLines() }));
     this.render();
   }
 

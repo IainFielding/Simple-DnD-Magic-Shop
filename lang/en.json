@@ -52,6 +52,10 @@
         "name": "Attitude a bad haggle costs",
         "hint": "How far a Trader cools toward a character who fails a haggle check. Set to 0 for no penalty beyond the day's lockout."
       },
+      "maxStockLines": {
+        "name": "Most items one Trader can stock",
+        "hint": "How many different items a Trader's shelves hold; a stack of anything counts once. Every item is sent to every player's browser, so a big shop makes the whole world heavier, and worlds past about 220 have had trouble placing tokens. Lowering this never removes stock: a Trader over the limit just takes nothing new."
+      },
       "fixedValueGoods": {
         "name": "Gems and art trade at full value",
         "hint": "Gemstones, art objects and trade goods are as good as coin: Traders buy and sell them at their listed value whatever the character's Charisma or the Trader's attitude, and they earn no goodwill."
@@ -110,13 +114,22 @@
         "preview": "Buys / sells",
         "previewNote": "Prices shown for a Charisma 10 stranger at attitude 50 — this Trader buys at ×{buys} and sells at ×{sells}. Your players will see their own.",
         "remove": "Remove from stock",
-        "dropHint": "Drag items here from a compendium or the Items sidebar.",
+        "dropHint": "Drag items, or a whole folder of them, here from a compendium or the Items sidebar.",
+        "dropFolderLoading": "Reading the folder…",
+        "dropFolderNotItems": "That is not a folder of items.",
+        "dropFolderEmpty": "Nothing in {name} can be stocked.",
+        "dropFolderTitle": "Stock a folder",
+        "dropFolderBody": "Stock <strong>{count}</strong> item(s) from <strong>{name}</strong> on <strong>{trader}</strong>? Anything already on the shelves has its stock raised instead.",
+        "dropFolderScrolls": "{count} spell(s) will be stocked as scrolls.",
+        "dropFolderTemplates": "{count} magic item template(s) will be left out. Drop each one on its own to choose what to make from it.",
+        "dropFolderSkipped": "{count} thing(s) that are not physical gear will be left out.",
+        "dropFolderRoom": "There is room for only {room} more line(s) (a Trader holds at most {max}), so the rest will be left out.",
         "dropNoTrader": "Create a Trader first, then drop items onto it.",
         "dropNotItem": "That is not an item.",
         "dropNotPhysical": "{name} is not physical gear, so a Trader cannot stock it.",
         "dropUnpriced": "{name} has no price. Set a price override, or players will not see it.",
         "emptyHeading": "Nothing in stock",
-        "emptyBody": "Drag items onto this window from a compendium or the Items sidebar to stock the shelves.",
+        "emptyBody": "Drag items, or a whole folder of them, onto this window from a compendium or the Items sidebar to stock the shelves.",
         "browse": "Browse compendiums",
         "clear": "Empty shelves",
         "clearTitle": "Empty the shelves",

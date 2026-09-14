@@ -1,4 +1,4 @@
-import { FIXED_VALUE_LOOT, MAX_STOCK_LINES, PHYSICAL_TYPES, RARITIES, clamp, normalizeRarity } from "../config.mjs";
+import { FIXED_VALUE_LOOT, PHYSICAL_TYPES, RARITIES, clamp, maxStockLines, normalizeRarity } from "../config.mjs";
 import { copperPerUnit, itemValueCp, toCopper } from "./pricing.mjs";
 
 /**
@@ -135,10 +135,10 @@ export function availableQty(item, line) {
  * How many more lines a Trader has room for. Never negative: a Trader from before the limit that
  * holds more than it keeps what it has, and simply takes no new lines until it is under.
  * @param {number} lineCount
- * @param {number} [max]
+ * @param {number} [max]  The world's limit, unless given.
  * @returns {number}
  */
-export function stockRoom(lineCount, max = MAX_STOCK_LINES) {
+export function stockRoom(lineCount, max = maxStockLines()) {
   return Math.max(0, max - Math.max(0, Math.floor(Number(lineCount) || 0)));
 }
 

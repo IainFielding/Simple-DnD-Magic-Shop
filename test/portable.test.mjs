@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  EXPORT_FORMAT, EXPORT_VERSION, IMPORT_ITEM_LIMIT, exportFileName, exportItem, exportTrader,
+  EXPORT_FORMAT, EXPORT_VERSION, exportFileName, exportItem, exportTrader,
   parseTraderExport
 } from "../scripts/data/portable.mjs";
 
@@ -159,8 +159,8 @@ describe("parseTraderExport", () => {
 
   it("caps how many lines one file can create", () => {
     const file = good();
-    file.items = Array.from({ length: IMPORT_ITEM_LIMIT + 10 }, (_, i) => ({ name: `Rock ${i}`, type: "loot" }));
-    expect(parseTraderExport(file).items).toHaveLength(IMPORT_ITEM_LIMIT);
+    file.items = Array.from({ length: 30 }, (_, i) => ({ name: `Rock ${i}`, type: "loot" }));
+    expect(parseTraderExport(file, { limit: 20 }).items).toHaveLength(20);
   });
 });
 

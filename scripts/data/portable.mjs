@@ -1,4 +1,4 @@
-import { MAX_STOCK_LINES, MODULE_ID, PHYSICAL_TYPES } from "../config.mjs";
+import { MODULE_ID, PHYSICAL_TYPES, maxStockLines } from "../config.mjs";
 import { clampAttitude } from "./attitude.mjs";
 import { sanitizeRestock } from "./restock.mjs";
 import { sanitizeBuyFilter, sanitizeLine } from "./stock.mjs";
@@ -34,12 +34,6 @@ export const EXPORT_FORMAT = `${MODULE_ID}.trader`;
  * file; adding an optional field is not a reason to bump it.
  */
 export const EXPORT_VERSION = 1;
-
-/**
- * The most stock lines an import will create: the same limit every Trader has. Anything past it in
- * a file is dropped and counted, so the GM can be told.
- */
-export const IMPORT_ITEM_LIMIT = MAX_STOCK_LINES;
 
 /* -------------------------------------------- */
 /*  Export                                      */
@@ -128,9 +122,12 @@ export function exportTrader(source, { moduleVersion = "", exportedAt = "" } = {
  * Errors are **localisation key suffixes** under `error.import.`, so the message a GM sees is
  * specific ("this file is from a newer version") rather than a generic failure.
  * @param {string|object} raw
+ * @param {object} [options]
+ * @param {number} [options.limit]  The most stock lines to keep: the world's limit, unless given.
+ *   Anything past it in the file is dropped and counted, so the GM can be told.
  * @returns {{ok: boolean, error: string|null, trader: object|null, items: object[], dropped: number}}
  */
-export function parseTraderExport(raw) {
+export function parseTraderExport(raw, { limit = maxStockLines() } = {}) {
   const fail = error => ({ ok: false, error, trader: null, items: [], dropped: 0 });
 
   let data = raw;
@@ -154,7 +151,7 @@ export function parseTraderExport(raw) {
   const usable = (Array.isArray(data.items) ? data.items : [])
     .map(exportItem)
     .filter(item => item && typeof item.name === "string" && item.name.trim());
-  const items = usable.slice(0, IMPORT_ITEM_LIMIT);
+  const items = usable.slice(0, limit);
 
   return {
     ok: true,

@@ -79,6 +79,10 @@
      shop as it does on a character sheet. WoW convention: common is ivory, then green, blue,
      purple, orange, gold.
 
+     Common is the exception to the border and text rules below. The toolkit gives it only a
+     faint ivory wash and nothing else, so it reads as ordinary gear; an ivory edge would make
+     it the brightest thing on the shelf, brighter than green or blue.
+
      Each is an RGB *triple* rather than a colour, so one hue can serve two jobs at two
      alphas: the toolkit's own low alpha as the tile wash, and a much higher one as the
      border. A 0.15 border is invisible, and on a 72px tile the border is the primary cue. */
@@ -561,10 +565,10 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
 .sogrom-shop .shop-tile.is-exhausted .shop-tile-button { cursor: context-menu; }
 .sogrom-shop .shop-tile.is-exhausted .shop-tile-button:hover { transform: none; }
 
-/* Rarity. The wash and the border share one hue at two alphas; see the token block. */
+/* Rarity. The wash and the border share one hue at two alphas; see the token block. Common keeps
+   the plain tile edge and takes only the toolkit's wash. */
 .sogrom-shop .shop-tile.rarity-common .shop-tile-button {
   background: rgba(var(--shop-rarity-common), 0.25);
-  border-color: rgba(var(--shop-rarity-common), var(--shop-rarity-edge));
 }
 .sogrom-shop .shop-tile.rarity-uncommon .shop-tile-button {
   background: rgba(var(--shop-rarity-uncommon), var(--shop-rarity-wash));
@@ -1095,7 +1099,6 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
 
 /* Rarity as text colour, for the stock table where a 30px icon carries no border. The same
    hue as the tile edge, at full strength because this is a foreground colour on a dark ground. */
-.sogrom-shop .shop-rarity-text.rarity-common { color: rgb(var(--shop-rarity-common)); }
 .sogrom-shop .shop-rarity-text.rarity-uncommon { color: rgb(var(--shop-rarity-uncommon)); }
 .sogrom-shop .shop-rarity-text.rarity-rare { color: rgb(var(--shop-rarity-rare)); }
 .sogrom-shop .shop-rarity-text.rarity-veryrare { color: rgb(var(--shop-rarity-veryrare)); }
@@ -1516,7 +1519,6 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
 
 /* Rarity as the left edge on a staged row: there is no room for a bordered tile here, and the
    left edge is the one part of a dense row that stays visible. */
-.sogrom-shop .shop-staged-row.rarity-common { border-left-color: rgb(var(--shop-rarity-common)); }
 .sogrom-shop .shop-staged-row.rarity-uncommon { border-left-color: rgb(var(--shop-rarity-uncommon)); }
 .sogrom-shop .shop-staged-row.rarity-rare { border-left-color: rgb(var(--shop-rarity-rare)); }
 .sogrom-shop .shop-staged-row.rarity-veryrare { border-left-color: rgb(var(--shop-rarity-veryrare)); }

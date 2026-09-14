@@ -411,12 +411,15 @@ export async function haggleSuite() {
   return report.summary;
 }
 
-/** A Trader holds at most 150 lines, whichever way stock arrives. */
+/** A Trader holds at most the world's limit of lines, whichever way stock arrives. */
 export async function stockLimitSuite() {
   const report = new Report();
   const mod = await load();
   let trader; let seller; let imported;
+  // The suite is written against the default, whatever this world was left at.
+  const previousLimit = game.settings.get(MODULE, "maxStockLines");
   try {
+    await game.settings.set(MODULE, "maxStockLines", 150);
     const rows = n => Array.from({ length: n }, (_, i) => ({
       name: `${PREFIX} Crate ${i}`, type: "loot",
       system: { quantity: 1, price: { value: 1, denomination: "gp" } }, flags: line()
@@ -481,9 +484,26 @@ export async function stockLimitSuite() {
     imported = result.actor;
     report.equal("an import keeps at most 150 lines", mod.trader.stockEntries(imported).length, 150);
     report.equal("and says how many it left out", result.dropped, 5);
+
+    // The GM's slider: raised, the same full Trader takes more.
+    await game.settings.set(MODULE, "maxStockLines", 160);
+    const more = await mod.trader.addMadeStock(trader, [{
+      name: `${PREFIX} Late Delivery`, type: "loot", system: { quantity: 1, price: { value: 1, denomination: "gp" } }
+    }]);
+    report.equal("raising the limit to 160 makes room on a full Trader", more.created.length, 1);
+    report.equal("which then holds 151 lines", mod.trader.stockEntries(trader).length, 151);
+
+    // Lowered below what a Trader holds, nothing is removed and nothing new goes in.
+    await game.settings.set(MODULE, "maxStockLines", 100);
+    const refused = await mod.trader.addMadeStock(trader, [{
+      name: `${PREFIX} Too Late`, type: "loot", system: { quantity: 1, price: { value: 1, denomination: "gp" } }
+    }]);
+    report.equal("lowering the limit removes no stock", mod.trader.stockEntries(trader).length, 151);
+    report.equal("but a Trader over it takes nothing new", refused.full.length, 1);
   } catch ( err ) {
     report.fail("stockLimitSuite threw", err);
   } finally {
+    await game.settings.set(MODULE, "maxStockLines", previousLimit).catch(() => {});
     if ( trader ) await trader.delete().catch(() => {});
     if ( imported ) await imported.delete().catch(() => {});
     if ( seller ) await seller.delete().catch(() => {});
