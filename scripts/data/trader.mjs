@@ -5,7 +5,7 @@ import { clampAttitude, emptySpend, recordSpend, sanitizeSpend, adjustAttitude }
 import { lockHaggle, sanitizeHaggleRecord } from "./haggle.mjs";
 import { defaultRestock, dueForRestock, restockPlan, sanitizeRestock } from "./restock.mjs";
 import {
-  defaultBuyFilter, defaultLine, sanitizeBuyFilter, sanitizeLine, stockRoom, transferData
+  defaultBuyFilter, defaultLine, sanitizeBuyFilter, sanitizeLine, stockKey, stockRoom, transferData
 } from "./stock.mjs";
 import {
   expandPool, isHollowTemplate, madeIdentity, makeRandomEnchantedData, makeScrollData, materialise
@@ -405,7 +405,8 @@ export function addMadeStock(actor, data, options = {}) {
  *
  * Takes either a resolved item and its uuid, or ready-made creation data. Made items are recognised
  * by what they were made from (`data/enchant.mjs#madeIdentity`) rather than by name — a Longsword +1
- * and a Flame Tongue Longsword share a base item and would otherwise merge.
+ * and a Flame Tongue Longsword share a base item and would otherwise merge. Every route also needs
+ * the image to match (`stock.mjs#stockKey`): the same item with a different picture is its own line.
  * @param {object} actor
  * @param {({item: object, uuid: string}|{data: object})[]} sources
  * @param {object} [options]
@@ -437,18 +438,22 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
   //
   // So name-and-type is the fallback. It is deliberately *only* a fallback: two genuinely
   // different items can share a name, and for compendium items the uuid settles it properly.
+  //
+  // All three keys carry the image. A folder of copies of one compendium item, each given its own
+  // picture, share a source uuid; keyed on that alone they collapsed into a single line.
+  const withImg = (key, doc) => `${key}|${doc?.img ?? ""}`;
   const byMade = new Map();
   const bySource = new Map();
   const byIdentity = new Map();
   for ( const item of actor.items ) {
     const made = madeIdentity(item.flags?.[MODULE_ID]?.madeFrom);
     if ( made ) {
-      byMade.set(made, item);
+      byMade.set(withImg(made, item), item);
       continue;
     }
     const source = item._stats?.compendiumSource;
-    if ( source ) bySource.set(source, item);
-    byIdentity.set(`${item.type}:${item.name}`, item);
+    if ( source ) bySource.set(withImg(source, item), item);
+    byIdentity.set(stockKey(item), item);
   }
 
   for ( const entry of sources ) {
@@ -456,11 +461,11 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
     // Ready-made data that was not made from anything (an API caller's own item data) is matched the
     // way a hand-made item is: by its compendium source if it names one, else by type and name.
     const subject = entry.item ?? entry.data;
-    const identity = made || `${subject.type}:${subject.name}`;
+    const identity = made ? withImg(made, subject) : stockKey(subject);
     const existing = made
-      ? byMade.get(made)
-      : (entry.uuid && bySource.get(entry.uuid))
-        ?? bySource.get(subject._stats?.compendiumSource) ?? byIdentity.get(identity);
+      ? byMade.get(identity)
+      : (entry.uuid && bySource.get(withImg(entry.uuid, subject)))
+        ?? bySource.get(withImg(subject._stats?.compendiumSource, subject)) ?? byIdentity.get(identity);
 
     if ( existing ) {
       // An unlimited line cannot be "raised" — there is nothing to add to — but it still counts

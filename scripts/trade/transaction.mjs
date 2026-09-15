@@ -7,7 +7,8 @@ import {
   totalCp
 } from "../data/pricing.mjs";
 import {
-  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible, newLinesFromSale, transferData
+  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible, newLinesFromSale, stockKey,
+  transferData
 } from "../data/stock.mjs";
 import {
   bookSpend, getAttitude, purse, recordTrade, stockEntries, stockLine, traderData
@@ -660,8 +661,9 @@ async function grantBoughtItems(actor, buying, journal) {
 /**
  * Add what a character sold onto the Trader's shelves.
  *
- * Merged into an existing line where the Trader already stocks the same thing, so selling three
- * daggers to a Trader that has two leaves one row of five rather than two rows. What arrives is
+ * Merged into an existing line where the Trader already stocks the same thing (`stock.mjs#stockKey`,
+ * so a dagger with a different picture is a different thing), so selling three daggers to a Trader
+ * that has two leaves one row of five rather than two rows. What arrives is
  * unequipped and unattuned — it was the character's state, not the item's.
  */
 async function absorbSoldItems(trader, selling, journal) {
@@ -669,7 +671,7 @@ async function absorbSoldItems(trader, selling, journal) {
   const toUpdate = new Map();
 
   for ( const line of selling ) {
-    const existing = trader.items.find(i => i.type === line.item.type && i.name === line.name);
+    const existing = trader.items.find(i => stockKey(i) === stockKey(line.item));
     if ( existing && !stockLine(existing).unlimited ) {
       toUpdate.set(existing.id, (toUpdate.get(existing.id) ?? 0) + line.qty);
       continue;

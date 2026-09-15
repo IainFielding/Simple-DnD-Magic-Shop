@@ -11,7 +11,7 @@ import {
 } from "../data/pricing.mjs";
 import { getTrader } from "../data/registry.mjs";
 import {
-  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible
+  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible, stockKey
 } from "../data/stock.mjs";
 import {
   getAttitude, haggleRecordFor, ledgerOf, purse, stockEntries, traderData
@@ -380,7 +380,7 @@ function sellableInventory(trader, actor, multipliers, fixedValue) {
   const out = [];
   // A full Trader still buys what it already stocks — that merges into the line — but nothing new.
   const shelf = stockEntries(trader);
-  const stocked = new Set(shelf.map(e => `${e.item.type}:${e.item.name}`));
+  const stocked = new Set(shelf.map(e => stockKey(e.item)));
   const full = shelf.length >= maxStockLines();
 
   for ( const item of actor.items ) {
@@ -398,7 +398,7 @@ function sellableInventory(trader, actor, multipliers, fixedValue) {
     const qty = Math.max(0, Math.floor(Number(item.system?.quantity) || 0));
     if ( qty <= 0 ) continue;
 
-    const noRoom = accepted && full && !stocked.has(`${item.type}:${item.name}`);
+    const noRoom = accepted && full && !stocked.has(stockKey(item));
     const fixed = isFixedValue(item, fixedValue);
     const sellCp = accepted ? applyMultiplier(valueCp, lineMultiplier(multipliers.sell, fixed)) : 0;
     out.push({

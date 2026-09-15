@@ -143,20 +143,33 @@ export function stockRoom(lineCount, max = maxStockLines()) {
 }
 
 /**
+ * The key two items must share to sit on one stock line: type, name and image.
+ *
+ * The image is part of it because a GM uses it to tell things apart. A folder of "Potion of
+ * Healing" copies each given its own bottle, or the same sword re-skinned per region, are the same
+ * item by every other measure — but merged into one line, all but one picture silently vanished.
+ * @param {{type: string, name: string, img?: string}} item
+ * @returns {string}
+ */
+export function stockKey(item) {
+  return `${item?.type}:${item?.name}:${item?.img ?? ""}`;
+}
+
+/**
  * How many new lines a sale would add to a Trader's shelves.
  *
- * A sold item merges into a line of the same type and name (see `trade/transaction.mjs`), so only
- * the goods the Trader does not already stock take up room — and two of the same thing sold in one
- * deal take up one.
- * @param {{type: string, name: string}[]} shelf    What stays on the shelf.
- * @param {{type: string, name: string}[]} selling  What the character is handing over.
+ * A sold item merges into a line with the same {@link stockKey} (see `trade/transaction.mjs`), so
+ * only the goods the Trader does not already stock take up room — and two of the same thing sold in
+ * one deal take up one.
+ * @param {{type: string, name: string, img?: string}[]} shelf    What stays on the shelf.
+ * @param {{type: string, name: string, img?: string}[]} selling  What the character is handing over.
  * @returns {number}
  */
 export function newLinesFromSale(shelf, selling) {
-  const have = new Set((shelf ?? []).map(i => `${i.type}:${i.name}`));
+  const have = new Set((shelf ?? []).map(stockKey));
   const added = new Set();
   for ( const item of selling ?? [] ) {
-    const key = `${item.type}:${item.name}`;
+    const key = stockKey(item);
     if ( !have.has(key) ) added.add(key);
   }
   return added.size;

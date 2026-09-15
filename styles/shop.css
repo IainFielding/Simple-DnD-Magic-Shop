@@ -566,9 +566,13 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
 .sogrom-shop .shop-tile.is-exhausted .shop-tile-button:hover { transform: none; }
 
 /* Rarity. The wash and the border share one hue at two alphas; see the token block. Common keeps
-   the plain tile edge and takes only the toolkit's wash. */
+   the plain tile edge and only a whisper of ivory laid over the ordinary panel, so it sits a
+   shade off a mundane tile. The toolkit's 0.25 replaces the panel outright, which on a dark
+   shelf turns common into the brightest tile there. */
 .sogrom-shop .shop-tile.rarity-common .shop-tile-button {
-  background: rgba(var(--shop-rarity-common), 0.25);
+  background:
+    linear-gradient(rgba(var(--shop-rarity-common), 0.05), rgba(var(--shop-rarity-common), 0.05)),
+    var(--shop-panel);
 }
 .sogrom-shop .shop-tile.rarity-uncommon .shop-tile-button {
   background: rgba(var(--shop-rarity-uncommon), var(--shop-rarity-wash));

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { STOCK_LINES, maxStockLines } from "../scripts/config.mjs";
-import { newLinesFromSale, stockRoom } from "../scripts/data/stock.mjs";
+import { newLinesFromSale, stockKey, stockRoom } from "../scripts/data/stock.mjs";
 import { parseTraderExport } from "../scripts/data/portable.mjs";
 
 /** Stand in for Foundry's settings store, holding one value for the stock limit. */
@@ -52,6 +52,14 @@ describe("the stock limit", () => {
     expect(newLinesFromSale(shelf, [{ type: "weapon", name: "Mace" }, { type: "weapon", name: "Mace" }])).toBe(1);
     // Same name, different type, is a different line — as the sale path merges it.
     expect(newLinesFromSale(shelf, [{ type: "equipment", name: "Dagger" }])).toBe(1);
+  });
+
+  it("treats the same item with a different image as a new line", () => {
+    const shelf = [{ type: "weapon", name: "Dagger", img: "icons/dagger-iron.webp" }];
+    expect(newLinesFromSale(shelf, [{ type: "weapon", name: "Dagger", img: "icons/dagger-iron.webp" }])).toBe(0);
+    expect(newLinesFromSale(shelf, [{ type: "weapon", name: "Dagger", img: "icons/dagger-bone.webp" }])).toBe(1);
+    expect(stockKey({ type: "weapon", name: "Dagger", img: "a.webp" }))
+      .not.toBe(stockKey({ type: "weapon", name: "Dagger", img: "b.webp" }));
   });
 
   it("imports at most the world's limit, and says how many it left out", () => {
