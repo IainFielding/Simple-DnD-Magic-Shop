@@ -35,7 +35,11 @@
         <span class="shop-rail-main">
           <span class="shop-rail-name">{{name}}</span>
           <span class="shop-rail-meta">
+            {{#if maxLines}}
             {{localize "sogrom-simple-dnd5e-magic-shop.manager.stockCount" count=stockCount max=maxLines}}
+            {{else}}
+            {{localize "sogrom-simple-dnd5e-magic-shop.manager.stockCountNoLimit" count=stockCount}}
+            {{/if}}
             <span class="shop-rail-dot" aria-hidden="true">·</span>
             {{purse}}
           </span>

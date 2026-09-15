@@ -13,7 +13,7 @@
 
 import {
   MODULE_ID, SETTINGS, DEFAULTS, DISPLAY_MODES, PRICING_PRESETS, HOOKS, STOCK_LINES,
-  ATTITUDE_MIN, ATTITUDE_MAX, fireHook, maxStockLines, tpl, t, log, setting
+  ATTITUDE_MIN, ATTITUDE_MAX, fireHook, tpl, t, log, setting
 } from "./config.mjs";
 import { TraderManagerApp } from "./app/manager-app.mjs";
 import { registerChatCard } from "./app/chat-card.mjs";
@@ -21,7 +21,7 @@ import { watchForeignWindows } from "./app/takeover.mjs";
 import { ShopApp } from "./app/shop-app.mjs";
 import { registerQueries } from "./trade/queries.mjs";
 import { claim, greet, registerClaims } from "./trade/claim.mjs";
-import { isStockItem, isTrader, sweepRestocks, stockEntries } from "./data/trader.mjs";
+import { isStockItem, isTrader, sweepRestocks, stockEntries, stockLimit } from "./data/trader.mjs";
 import { registerApi } from "./api.mjs";
 // Imported for its side effect: the file declares the shop-context query at module scope.
 // Without this import nothing would ever register it, and a player's shop would find no
@@ -64,7 +64,7 @@ Hooks.once("init", () => {
   Hooks.on("preCreateItem", (item, _data, options) => {
     const actor = item.parent;
     if ( !isTrader(actor) || !isStockItem(item) || options?.[MODULE_ID]?.restoring ) return;
-    const max = maxStockLines();
+    const max = stockLimit(actor);
     if ( stockEntries(actor).length < max ) return;
     ui.notifications.warn(t("manager.stock.full", { count: 1, max }));
     return false;

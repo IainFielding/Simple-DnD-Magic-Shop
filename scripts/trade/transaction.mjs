@@ -1,5 +1,5 @@
 import {
-  HOOKS, MODULE_ID, SETTINGS, fireCancellableHook, fireHook, log, maxStockLines, setting, t
+  HOOKS, MODULE_ID, SETTINGS, fireCancellableHook, fireHook, log, setting, t
 } from "../config.mjs";
 import { attitudeTier } from "../data/attitude.mjs";
 import {
@@ -11,7 +11,7 @@ import {
   transferData
 } from "../data/stock.mjs";
 import {
-  bookSpend, getAttitude, purse, recordTrade, stockEntries, stockLine, traderData
+  bookSpend, getAttitude, purse, recordTrade, stockEntries, stockLimit, stockLine, traderData
 } from "../data/trader.mjs";
 import { makeEntry } from "../data/ledger.mjs";
 import { serialised } from "../data/serial.mjs";
@@ -151,7 +151,7 @@ export function planTrade({ trader, actor, payer = actor, intent }) {
     const emptied = new Set(buying.filter(l => !l.unlimited && l.qty >= l.available).map(l => l.id));
     const shelf = stockEntries(trader).filter(e => !emptied.has(e.id)).map(e => e.item);
     const adding = newLinesFromSale(shelf, selling.map(l => l.item));
-    const max = maxStockLines();
+    const max = stockLimit(trader);
     if ( adding > 0 && shelf.length + adding > max ) {
       throw new Error(t("error.shopFull", { name: trader.name, max }));
     }

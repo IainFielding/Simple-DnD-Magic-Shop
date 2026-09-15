@@ -203,7 +203,9 @@ export async function importTrader(raw) {
   Object.assign(data.flags[MODULE_ID], {
     buyFilter: trader.buyFilter,
     restock: { ...trader.restock, lastAt: 0 },
-    attitudeGain: trader.attitudeGain
+    attitudeGain: trader.attitudeGain,
+    allUnlimited: trader.allUnlimited,
+    noStockLimit: trader.noStockLimit
   });
   data.system = { currency: trader.currency };
   data.items = items;

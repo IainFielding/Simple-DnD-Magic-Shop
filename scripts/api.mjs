@@ -10,7 +10,7 @@ import {
 } from "./data/registry.mjs";
 import {
   addMadeStock, addStockItems, applyArchetype, clearLedger, getAttitude, ledgerOf, nudgeAttitude,
-  restockTrader, setAttitude, spendFor, stockEntries, stockFromRecipe, stockLine, traderData
+  restockTrader, setAttitude, spendFor, stockEntries, stockFromRecipe, traderData
 } from "./data/trader.mjs";
 import { makeEnchantedData, makeScrollData, templateChoices } from "./data/enchant.mjs";
 import { sanitizeLine } from "./data/stock.mjs";
@@ -413,7 +413,10 @@ export function buildApi() {
       if ( Object.keys(line).length ) {
         // Merged onto the sanitized current line, so a caller may patch one field without
         // having to restate the rest — and so an unrecognised field cannot land in the flag.
-        await item.update({ [`flags.${MODULE_ID}`]: sanitizeLine({ ...stockLine(item), ...line }) });
+        // The item's *own* line, not `stockLine`: that one reports a Trader-wide "everything is
+        // unlimited" as the line's setting, and merging it back would bake it into the item.
+        const own = sanitizeLine(item.flags?.[MODULE_ID]);
+        await item.update({ [`flags.${MODULE_ID}`]: sanitizeLine({ ...own, ...line }) });
       }
       return item;
     },

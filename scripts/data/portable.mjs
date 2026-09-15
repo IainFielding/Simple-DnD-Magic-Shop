@@ -12,7 +12,7 @@ import { sanitizeBuyFilter, sanitizeLine } from "./stock.mjs";
  * ## What travels, and what does not
  *
  * **Travels:** who the Trader is (name, portrait, greeting, starting attitude), how it trades (buy
- * filter, restock rule, goodwill override), its purse, and its stock as **full item data** — so a
+ * filter, restock rule, goodwill override, its two shelf options), its purse, and its stock as **full item data** — so a
  * shop stocked from a compendium the other world does not have still arrives whole, GM edits and
  * price overrides included.
  *
@@ -103,6 +103,8 @@ export function exportTrader(source, { moduleVersion = "", exportedAt = "" } = {
       // The restock *rule* travels; the moment it last ran is this world's clock and does not.
       restock: { mode: restock.mode, days: restock.days },
       attitudeGain: sanitizeGain(flags.attitudeGain),
+      allUnlimited: flags.allUnlimited === true,
+      noStockLimit: flags.noStockLimit === true,
       currency: sanitizeCurrency(source?.system?.currency)
     },
     items: (Array.isArray(source?.items) ? source.items : []).map(exportItem).filter(Boolean)
@@ -124,7 +126,8 @@ export function exportTrader(source, { moduleVersion = "", exportedAt = "" } = {
  * @param {string|object} raw
  * @param {object} [options]
  * @param {number} [options.limit]  The most stock lines to keep: the world's limit, unless given.
- *   Anything past it in the file is dropped and counted, so the GM can be told.
+ *   Anything past it in the file is dropped and counted, so the GM can be told. A Trader exported
+ *   with no line limit keeps everything, since it will have no limit here either.
  * @returns {{ok: boolean, error: string|null, trader: object|null, items: object[], dropped: number}}
  */
 export function parseTraderExport(raw, { limit = maxStockLines() } = {}) {
@@ -151,7 +154,8 @@ export function parseTraderExport(raw, { limit = maxStockLines() } = {}) {
   const usable = (Array.isArray(data.items) ? data.items : [])
     .map(exportItem)
     .filter(item => item && typeof item.name === "string" && item.name.trim());
-  const items = usable.slice(0, limit);
+  const noStockLimit = t.noStockLimit === true;
+  const items = noStockLimit ? usable : usable.slice(0, limit);
 
   return {
     ok: true,
@@ -165,6 +169,8 @@ export function parseTraderExport(raw, { limit = maxStockLines() } = {}) {
       buyFilter: sanitizeBuyFilter(t.buyFilter),
       restock: (({ mode, days }) => ({ mode, days }))(sanitizeRestock(t.restock)),
       attitudeGain: sanitizeGain(t.attitudeGain),
+      allUnlimited: t.allUnlimited === true,
+      noStockLimit,
       currency: sanitizeCurrency(t.currency)
     },
     items,

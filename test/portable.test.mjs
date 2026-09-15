@@ -97,6 +97,8 @@ describe("exportTrader", () => {
       buyFilter: { allowAll: false, types: ["weapon"], rarities: [] },
       restock: { mode: "time", days: 4 },
       attitudeGain: { cpPerPoint: 5000, capPerVisit: 3 },
+      allUnlimited: false,
+      noStockLimit: false,
       currency: { pp: 1, gp: 250, ep: 0, sp: 3, cp: 0 }
     });
   });
@@ -161,6 +163,26 @@ describe("parseTraderExport", () => {
     const file = good();
     file.items = Array.from({ length: 30 }, (_, i) => ({ name: `Rock ${i}`, type: "loot" }));
     expect(parseTraderExport(file, { limit: 20 }).items).toHaveLength(20);
+  });
+
+  it("carries both shelf options, and keeps every line of a Trader with no limit", () => {
+    const source = traderSource();
+    Object.assign(source.flags[MODULE], { allUnlimited: true, noStockLimit: true });
+    const file = exportTrader(source);
+    expect(file.trader).toMatchObject({ allUnlimited: true, noStockLimit: true });
+
+    file.items = Array.from({ length: 30 }, (_, i) => ({ name: `Rock ${i}`, type: "loot" }));
+    const parsed = parseTraderExport(file, { limit: 20 });
+    expect(parsed.trader).toMatchObject({ allUnlimited: true, noStockLimit: true });
+    expect(parsed.items).toHaveLength(30);
+    expect(parsed.dropped).toBe(0);
+  });
+
+  it("reads a missing or malformed shelf option as off", () => {
+    const file = good();
+    file.trader.allUnlimited = "yes";
+    delete file.trader.noStockLimit;
+    expect(parseTraderExport(file).trader).toMatchObject({ allUnlimited: false, noStockLimit: false });
   });
 });
 

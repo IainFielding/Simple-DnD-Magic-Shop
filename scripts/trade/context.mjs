@@ -1,5 +1,5 @@
 import {
-  HOOKS, SETTINGS, fireCancellableHook, log, maxStockLines, normalizeRarity, pricingAnchors, setting, t
+  HOOKS, SETTINGS, fireCancellableHook, log, normalizeRarity, pricingAnchors, setting, t
 } from "../config.mjs";
 import { attitudeTier } from "../data/attitude.mjs";
 import { HAGGLE_SKILLS, haggleDc, haggleEdge, isHaggleLocked } from "../data/haggle.mjs";
@@ -14,7 +14,7 @@ import {
   acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible, stockKey
 } from "../data/stock.mjs";
 import {
-  getAttitude, haggleRecordFor, ledgerOf, purse, stockEntries, traderData
+  getAttitude, haggleRecordFor, ledgerOf, purse, stockEntries, stockLimit, traderData
 } from "../data/trader.mjs";
 import { QUERIES, defineQuery } from "./queries.mjs";
 
@@ -381,7 +381,7 @@ function sellableInventory(trader, actor, multipliers, fixedValue) {
   // A full Trader still buys what it already stocks — that merges into the line — but nothing new.
   const shelf = stockEntries(trader);
   const stocked = new Set(shelf.map(e => stockKey(e.item)));
-  const full = shelf.length >= maxStockLines();
+  const full = shelf.length >= stockLimit(trader);
 
   for ( const item of actor.items ) {
     // Containers are skipped outright: selling a backpack whose contents are tracked inside it

@@ -18,7 +18,8 @@ import {
 import { droppedFolderItems, sortDropped } from "../data/folder-drop.mjs";
 import {
   addMadeStock, addStockItems, applyArchetype, clearLedger, gainSettings, getAttitude, ledgerOf, purse,
-  restockTrader, setAttitude, spendFor, stockEntries, stockFromRecipe, stockLine, stockPool, traderData
+  restockTrader, setAttitude, spendFor, stockEntries, stockFromRecipe, stockLimit, stockLine, stockPool,
+  traderData
 } from "../data/trader.mjs";
 import {
   enchantmentValueCp, isHollowTemplate, makeEnchantedData, makeScrollData, templateCatalogue,
@@ -233,7 +234,8 @@ export class TraderManagerApp extends ShopShellBase {
       img: actor.img,
       active: actor.id === this.#selected,
       stockCount: entries.length,
-      maxLines: maxStockLines(),
+      // Null for a Trader with no limit, which the template reads as "just say how many".
+      maxLines: Number.isFinite(stockLimit(actor)) ? stockLimit(actor) : null,
       purse: formatCp(this.#purseCp(actor))
     };
   }
@@ -341,6 +343,14 @@ export class TraderManagerApp extends ShopShellBase {
         capPerVisit: (gain ?? gainSettings(actor)).capPerVisit,
         worldPerPoint: setting(SETTINGS.attitudeGainPerPoint),
         worldCap: setting(SETTINGS.attitudeGainCap)
+      },
+      shelves: {
+        allUnlimited: data.allUnlimited,
+        noStockLimit: data.noStockLimit,
+        worldLimit: maxStockLines(),
+        // Lifting the limit and then putting it back leaves a Trader holding more than the world
+        // allows. It keeps them, but takes nothing new until it is under, and the GM should know.
+        over: Math.max(0, stockEntries(actor).length - maxStockLines())
       }
     };
   }
@@ -566,6 +576,8 @@ export class TraderManagerApp extends ShopShellBase {
    */
   #stockContext(actor) {
     const multipliers = priceMultipliers({ chaMod: 0, attitude: 50 });
+    const { allUnlimited } = traderData(actor);
+    const limit = stockLimit(actor);
     const denominations = Object.keys(CONFIG.DND5E.currencies);
 
     const rows = stockEntries(actor).map(({ id, item, line }) => {
@@ -581,6 +593,9 @@ export class TraderManagerApp extends ShopShellBase {
         rarity: normalizeRarity(item.system?.rarity),
         quantity: item.system?.quantity ?? 0,
         unlimited: line.unlimited,
+        // The row's own toggle means nothing while the Trader makes everything unlimited, so it is
+        // shown ticked and locked rather than inviting a click that would change nothing.
+        unlimitedLocked: allUnlimited,
         baseQty: line.baseQty,
         revealAt: line.revealAt,
         // An item with no price of its own and no override cannot be sold; the row says so
@@ -604,8 +619,8 @@ export class TraderManagerApp extends ShopShellBase {
       rows,
       hasRows: rows.length > 0,
       lineCount: rows.length,
-      maxLines: maxStockLines(),
-      isFull: rows.length >= maxStockLines(),
+      maxLines: Number.isFinite(limit) ? limit : null,
+      isFull: rows.length >= limit,
       // Worded from the Trader's side, matching the column: it buys at the character's sell
       // multiplier and sells at their buy multiplier.
       previewNote: t("manager.stock.previewNote", {
@@ -1157,6 +1172,10 @@ export class TraderManagerApp extends ShopShellBase {
         await trader.setFlag(MODULE_ID, `buyFilter.${key}`, selected);
         break;
       }
+      case "allUnlimited":
+      case "noStockLimit":
+        await trader.setFlag(MODULE_ID, field, input.checked);
+        break;
       case "restockMode":
         await trader.setFlag(MODULE_ID, "restock.mode", input.value);
         break;
@@ -1316,12 +1335,13 @@ export class TraderManagerApp extends ShopShellBase {
     const count = plain.length + spells.length;
     if ( !count ) return void ui.notifications.warn(t("manager.stock.dropFolderEmpty", { name: dropped.name }));
 
-    const room = stockRoom(stockEntries(trader).length);
+    const limit = stockLimit(trader);
+    const room = stockRoom(stockEntries(trader).length, limit);
     const notes = [
       spells.length && t("manager.stock.dropFolderScrolls", { count: spells.length }),
       templates.length && t("manager.stock.dropFolderTemplates", { count: templates.length }),
       skipped.length && t("manager.stock.dropFolderSkipped", { count: skipped.length }),
-      (count > room) && t("manager.stock.dropFolderRoom", { room, max: maxStockLines() })
+      (count > room) && t("manager.stock.dropFolderRoom", { room, max: limit })
     ].filter(Boolean);
     const proceed = await foundry.applications.api.DialogV2.confirm({
       window: { title: t("manager.stock.dropFolderTitle"), icon: "fa-solid fa-folder-open" },
@@ -1338,7 +1358,7 @@ export class TraderManagerApp extends ShopShellBase {
     if ( spells.length ) {
       // Only as many scrolls as there is still room for. Each one is a whole item built from the
       // spell, so making three hundred to keep a few would be a long wait for nothing.
-      const fits = spells.slice(0, stockRoom(stockEntries(trader).length));
+      const fits = spells.slice(0, stockRoom(stockEntries(trader).length, limit));
       result.full.push(...spells.slice(fits.length).map(spell => spell.uuid));
       const scrolls = [];
       for ( const spell of fits ) {

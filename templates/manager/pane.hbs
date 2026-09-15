@@ -167,7 +167,11 @@
       {{!-- How much room is left on the shelves. Worded rather than coloured alone. --}}
       <p class="shop-stock-lines {{#if isFull}}is-full{{/if}}" aria-live="polite">
         {{#if isFull}}<i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>{{/if}}
+        {{#if maxLines}}
         {{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.lines" count=lineCount max=maxLines}}
+        {{else}}
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.linesNoLimit" count=lineCount}}
+        {{/if}}
         {{#if isFull}}— {{localize "sogrom-simple-dnd5e-magic-shop.manager.stock.fullNote"}}{{/if}}
       </p>
       <div class="shop-stock-actions">
@@ -386,8 +390,9 @@
                      {{#if unlimited}}disabled{{/if}}
                      aria-label="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.qty'}}">
               <label class="shop-check"
-                     data-tooltip="{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.unlimitedHint'}}">
-                <input type="checkbox" data-shop-field="unlimited" {{#if unlimited}}checked{{/if}}>
+                     data-tooltip="{{#if unlimitedLocked}}{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.unlimitedLocked'}}{{else}}{{localize 'sogrom-simple-dnd5e-magic-shop.manager.stock.unlimitedHint'}}{{/if}}">
+                <input type="checkbox" data-shop-field="unlimited" {{#if unlimited}}checked{{/if}}
+                       {{#if unlimitedLocked}}disabled{{/if}}>
                 <i class="fa-solid fa-infinity" aria-hidden="true"></i>
                 <span class="shop-sr-only">{{localize "sogrom-simple-dnd5e-magic-shop.stock.unlimited"}}</span>
               </label>
@@ -492,6 +497,29 @@
         </div>
       </div>
       {{/unless}}
+    </fieldset>
+
+    {{!-- Off by default: a shop that never runs out, or never fills up, is the exception a GM opts
+          one Trader into — a temple's endless holy water, a capital's grand bazaar. --}}
+    <fieldset class="shop-fieldset">
+      <legend>{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.shelves.legend"}}</legend>
+
+      <label class="shop-check shop-check--block">
+        <input type="checkbox" data-shop-field="allUnlimited" {{#if shelves.allUnlimited}}checked{{/if}}>
+        <span>{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.shelves.allUnlimited"}}</span>
+      </label>
+      <span class="shop-field-hint">{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.shelves.allUnlimitedHint"}}</span>
+
+      <label class="shop-check shop-check--block">
+        <input type="checkbox" data-shop-field="noStockLimit" {{#if shelves.noStockLimit}}checked{{/if}}>
+        <span>{{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.shelves.noStockLimit"}}</span>
+      </label>
+      <span class="shop-field-hint">
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.shelves.noStockLimitHint" max=shelves.worldLimit}}
+        {{#if shelves.noStockLimit}}{{#if shelves.over}}
+        {{localize "sogrom-simple-dnd5e-magic-shop.manager.trading.shelves.over" count=shelves.over}}
+        {{/if}}{{/if}}
+      </span>
     </fieldset>
 
     <fieldset class="shop-fieldset">

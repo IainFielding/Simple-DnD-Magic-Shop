@@ -75,6 +75,7 @@
       "folderName": "Traders",
       "noTraders": "No Traders yet.",
       "stockCount": "{count} of {max} lines",
+      "stockCountNoLimit": "{count} lines",
       "duplicate": "Duplicate this Trader, without its opinion of anyone",
       "emptyHeading": "No Traders yet",
       "emptyBody": "Create a Trader to give it stock, a purse, and an opinion of your players.",
@@ -111,6 +112,7 @@
         "revealAt": "Reveal at",
         "revealAtHint": "Attitude a character needs before they can see this line at all. Leave blank to show it to everyone.",
         "unlimitedHint": "Never runs out",
+        "unlimitedLocked": "Never runs out: this Trader makes every item unlimited (see the Trading tab)",
         "preview": "Buys / sells",
         "previewNote": "Prices shown for a Charisma 10 stranger at attitude 50 — this Trader buys at ×{buys} and sells at ×{sells}. Your players will see their own.",
         "remove": "Remove from stock",
@@ -135,6 +137,7 @@
         "clearTitle": "Empty the shelves",
         "clearBody": "Remove all {count} lines from <strong>{name}</strong>? This cannot be undone.",
         "lines": "{count} of {max} lines",
+        "linesNoLimit": "{count} lines, no limit",
         "fullNote": "the shelves are full. Remove a line to add another.",
         "full": "{count} item(s) not added: a Trader holds at most {max} lines."
       },
@@ -185,6 +188,14 @@
           "now": "Restock now",
           "due": "Next refill in {days} day(s) of game time.",
           "hint": "Refilling tops each line back up to its “restock to” figure. It never trims a line you have stocked higher."
+        },
+        "shelves": {
+          "legend": "Shelves",
+          "allUnlimited": "Every item is unlimited",
+          "allUnlimitedHint": "Nothing on these shelves ever runs out. Each line's own setting comes back when you switch this off.",
+          "noStockLimit": "No limit on stock lines",
+          "noStockLimitHint": "Stock as many different items as you like, instead of the world's limit of {max}.",
+          "over": "This Trader holds {count} more than that; switched off, it keeps them but takes nothing new until it is under."
         },
         "restocked": "Refilled {count} line(s).",
         "nothingToRestock": "The shelves are already full.",

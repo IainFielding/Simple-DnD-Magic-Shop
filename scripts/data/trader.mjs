@@ -76,8 +76,35 @@ export function traderData(actor) {
     haggle: raw.haggle && typeof raw.haggle === "object" ? raw.haggle : {},
     attitudeGain: sanitizeGain(raw.attitudeGain),
     buyFilter: sanitizeBuyFilter(raw.buyFilter),
-    restock: sanitizeRestock(raw.restock)
+    restock: sanitizeRestock(raw.restock),
+    allUnlimited: raw.allUnlimited === true,
+    noStockLimit: raw.noStockLimit === true
   };
+}
+
+/**
+ * Whether every line on this Trader is unlimited, whatever each line's own setting says.
+ *
+ * Read off the flag directly rather than through {@link traderData}, because {@link stockLine} asks
+ * this for every row of every render and has no use for the rest of the Trader's configuration.
+ * @param {object} actor
+ * @returns {boolean}
+ */
+export function everythingUnlimited(actor) {
+  return actor?.flags?.[MODULE_ID]?.allUnlimited === true;
+}
+
+/**
+ * The most stock lines this Trader may hold: the world's limit, unless the GM lifted it for this one.
+ *
+ * Every check of the limit goes through here rather than {@link maxStockLines}, so a Trader with no
+ * limit is never stopped by one route that forgot. `Infinity` works as-is in every comparison and
+ * in {@link stockRoom}; only text shown to the GM has to say "no limit" instead.
+ * @param {object} actor
+ * @returns {number}
+ */
+export function stockLimit(actor) {
+  return actor?.flags?.[MODULE_ID]?.noStockLimit === true ? Infinity : maxStockLines();
 }
 
 /**
@@ -262,7 +289,11 @@ export function characterId(character) {
  * key returns undefined, not the scope.
  */
 export function stockLine(item) {
-  return sanitizeLine(item?.flags?.[MODULE_ID]);
+  const line = sanitizeLine(item?.flags?.[MODULE_ID]);
+  // Applied here, on read, rather than written onto each item. Every consumer of a line — the shop,
+  // settlement, restocking, the stock table — gets it for free, and switching the Trader's option
+  // back off leaves each line exactly as the GM had set it.
+  return everythingUnlimited(item?.parent) ? { ...line, unlimited: true } : line;
 }
 
 /**
@@ -412,7 +443,7 @@ export function addMadeStock(actor, data, options = {}) {
  * @param {object} [options]
  * @param {number} [options.qty]
  * @param {object} [options.line]
- * Stops at the world's stock limit ({@link maxStockLines}). What is already stocked is still raised when the shelf is full —
+ * Stops at the Trader's stock limit ({@link stockLimit}). What is already stocked is still raised when the shelf is full —
  * that takes no room — and what would need a new line is reported in `full` rather than created.
  * @returns {Promise<{created: object[], raised: object[], failed: string[], full: string[]}>}
  */
@@ -420,7 +451,8 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
   const created = [];
   const raised = [];
   const full = [];
-  let room = stockRoom(stockEntries(actor).length);
+  const limit = stockLimit(actor);
+  let room = stockRoom(stockEntries(actor).length, limit);
 
   // Accumulated rather than appended, because one batch can name the same item more than once —
   // a generator drawing from overlapping packs, or a roll table with a repeated entry. Two
@@ -523,7 +555,7 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
   }
 
   logTrader(actor, `stock added: ${created.length} new, ${raised.length} raised, ${failed.length} refused, `
-    + `${full.length} over the ${maxStockLines()}-line limit`);
+    + `${full.length} over the ${limit}-line limit`);
   return { created, raised, failed, full };
 }
 
