@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { STOCK_LINES, maxStockLines } from "../scripts/config.mjs";
-import { newLinesFromSale, stockKey, stockRoom } from "../scripts/data/stock.mjs";
+import { newLinesFromSale, sourceUuid, stockKey, stockRoom } from "../scripts/data/stock.mjs";
 import { parseTraderExport } from "../scripts/data/portable.mjs";
 
 /** Stand in for Foundry's settings store, holding one value for the stock limit. */
@@ -74,5 +74,26 @@ describe("the stock limit", () => {
 
     withLimit(300);
     expect(parseTraderExport(file).dropped).toBe(20);
+  });
+});
+
+describe("sourceUuid", () => {
+  const MODULE = "sogrom-simple-dnd5e-magic-shop";
+
+  it("points a made magic item at its template rather than the base item", () => {
+    expect(sourceUuid({
+      uuid: "Actor.t.Item.x",
+      _stats: { compendiumSource: "Compendium.dnd5e.items.Item.longsword" },
+      flags: { [MODULE]: { madeFrom: { template: "Compendium.dmg.items.Item.flameTongue", base: "B" } } }
+    })).toBe("Compendium.dmg.items.Item.flameTongue");
+  });
+
+  it("points anything else at its compendium entry, then a scroll's spell, then itself", () => {
+    expect(sourceUuid({ uuid: "Actor.t.Item.x", _stats: { compendiumSource: "Compendium.a.b.Item.c" } }))
+      .toBe("Compendium.a.b.Item.c");
+    expect(sourceUuid({ uuid: "Actor.t.Item.x", flags: { [MODULE]: { madeFrom: { spell: "Compendium.s.Item.fireball" } } } }))
+      .toBe("Compendium.s.Item.fireball");
+    expect(sourceUuid({ uuid: "Actor.t.Item.x" })).toBe("Actor.t.Item.x");
+    expect(sourceUuid(null)).toBe("");
   });
 });

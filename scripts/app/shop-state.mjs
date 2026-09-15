@@ -178,6 +178,21 @@ export class ShopState {
     return true;
   }
 
+  /**
+   * How many more of a line could go on the counter: 0 for one the Trader will not trade or that
+   * is all staged already, `Infinity` for an unlimited line. What the right-click menu asks before
+   * offering to add, so it never offers something {@link stage} would refuse.
+   * @param {"take"|"give"} side
+   * @param {string} id
+   * @returns {number}
+   */
+  remaining(side, id) {
+    const line = this.#line(side, id);
+    if ( !line || line.blocked ) return 0;
+    if ( line.unlimited ) return Infinity;
+    return Math.max(0, line.qty - this.staged(side, id));
+  }
+
   /** The context line behind a staged id. */
   #line(side, id) {
     const source = side === "take" ? this.context?.stock : this.context?.pack;

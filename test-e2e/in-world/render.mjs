@@ -34,6 +34,9 @@ class Report {
 /** Let a render settle. ApplicationV2 renders asynchronously through several awaits. */
 const settle = () => new Promise(resolve => setTimeout(resolve, 250));
 
+/** A double-click, which is what puts an item on the counter now that a single click does nothing. */
+const doubleClick = element => element?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+
 /* -------------------------------------------- */
 
 /**
@@ -458,12 +461,16 @@ export async function shopSuite(mode = "windowed") {
     report.check("which start out the same width",
       widthsBefore[0] === widthsBefore[1], widthsBefore.join(" vs "));
 
-    // Stage one and make sure the counter and footer follow.
-    const button = tiles[0]?.querySelector('[data-action="stageLine"]');
-    if ( report.check("a tile has a stage button", !!button) ) {
+    // A single click does nothing; a double-click stages one. Make sure the counter and footer follow.
+    const button = tiles[0]?.querySelector(".shop-tile-button");
+    if ( report.check("a tile has a button", !!button) ) {
       button.click();
       await settle();
-      report.check("staging puts a row on the counter",
+      report.check("a single click on a tile leaves the counter alone",
+        !app.element.querySelector(".shop-staged-row"));
+      doubleClick(button);
+      await settle();
+      report.check("double-clicking a tile puts a row on the counter",
         !!app.element.querySelector(".shop-staged-row"));
       report.check("and the footer shows what is owed",
         !!app.element.querySelector(".shop-balance .shop-coin"));
@@ -485,61 +492,157 @@ export async function shopSuite(mode = "windowed") {
       headings.length === 2 && headings[0].includes("give") && headings[1].includes("take"),
       headings.join(" | "));
 
-    // Right-click puts an item back — the mirror of left-click putting it on the counter.
+    // The right-click menu, double-click to take back, and dragging.
     //
     // Exercised on the one-off item on purpose. Staging its only unit exhausts the line, and
-    // exhaustion used to disable the tile; a disabled button gets no mouse events, so the
-    // right-click that should have put it back did nothing on exactly this tile.
-    const rightClick = element => {
+    // exhaustion used to disable the tile; a disabled button gets no mouse events, so the menu
+    // that should put it back would never open on exactly this tile.
+    // Foundry animates its menu shut for 200ms and only then removes it — and removes whichever
+    // menu element it holds at that moment. A right-click that opens the next menu before the last
+    // one has finished closing has that new menu removed out from under it. So every right-click
+    // here first waits for the previous menu to be gone, then for its own to appear.
+    const menuOpen = () => !!document.querySelector("#context-menu");
+    const until = async (test, ms = 2000) => {
+      for ( const end = Date.now() + ms; !test() && Date.now() < end; ) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    };
+    const rightClick = async element => {
+      await until(() => !menuOpen());
       const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 });
       element.dispatchEvent(event);
       return event;
     };
+    // Foundry draws the menu as `#context-menu` on the page, not inside the window.
+    const menuLabels = () => [...document.querySelectorAll("#context-menu .context-item")]
+      .map(item => item.textContent.trim());
+    const pickFromMenu = async label => {
+      const entry = [...document.querySelectorAll("#context-menu .context-item")]
+        .find(item => item.textContent.trim() === label);
+      entry?.click();
+      await until(() => !menuOpen());
+      await settle();
+      return !!entry;
+    };
+    const closeMenu = async () => {
+      ui.context?.close();
+      await until(() => !menuOpen());
+    };
     const rareTile = () => [...app.element.querySelectorAll(".shop-panel--stock .shop-tile")]
       .find(tile => tile.dataset.name?.includes("Rare Thing"));
-    const stagedRare = () => [...app.element.querySelectorAll(".shop-staged-row")]
-      .some(row => row.textContent.includes("Rare Thing"));
+    const rareRow = () => [...app.element.querySelectorAll(".shop-staged-row")]
+      .find(row => row.textContent.includes("Rare Thing"));
+    const menuText = key => game.i18n.localize(`${MODULE}.shop.menu.${key}`);
 
     const rare = rareTile();
     if ( report.check("the one-off item has a tile", !!rare) ) {
-      rare.querySelector('[data-action="stageLine"]').click();
-      await settle();
-      report.check("staging its only unit puts it on the counter", stagedRare());
-      report.check("and leaves its tile clickable rather than disabled",
+      report.check("and knows which compendium entry to show", !!rare.dataset.sourceUuid,
+        "the tile carries no data-source-uuid");
+
+      await rightClick(rare.querySelector(".shop-tile-button"));
+      await until(menuOpen);
+      report.check("right-clicking a tile opens a menu offering to add it and to view it",
+        menuLabels().includes(menuText("addOne")) && menuLabels().includes(menuText("view")),
+        menuLabels().join(" | "));
+      report.check("but not to take back what is not on the counter",
+        !menuLabels().includes(menuText("removeOne")), menuLabels().join(" | "));
+      report.check("and not 'several' of a line that has only one",
+        !menuLabels().includes(menuText("addSome")), menuLabels().join(" | "));
+      await pickFromMenu(menuText("addOne"));
+      report.check("choosing 'put one on the counter' stages it", !!rareRow());
+      report.check("and leaves its tile enabled rather than disabled",
         rareTile()?.querySelector(".shop-tile-button")?.disabled === false,
-        "the exhausted tile was disabled, so right-click could not reach it");
+        "the exhausted tile was disabled, so the menu could not reach it");
 
-      const event = rightClick(rareTile().querySelector(".shop-tile-button"));
-      await settle();
-      report.check("right-clicking the tile takes it back off the counter", !stagedRare(),
-        "the item was still on the counter after a right-click");
-      report.check("and suppresses the browser's own menu", event.defaultPrevented);
+      await rightClick(rareTile().querySelector(".shop-tile-button"));
+      await until(menuOpen);
+      report.check("the exhausted tile's menu offers to take it back, not to add more",
+        menuLabels().includes(menuText("removeOne")) && !menuLabels().includes(menuText("addOne")),
+        menuLabels().join(" | "));
+      await pickFromMenu(menuText("removeOne"));
+      report.check("choosing 'take one back' takes it off the counter", !rareRow());
 
-      // Same gesture on the counter row itself.
-      rareTile().querySelector('[data-action="stageLine"]').click();
+      // Double-click the tile on, then double-click the counter row off.
+      doubleClick(rareTile().querySelector(".shop-tile-button"));
       await settle();
-      const row = [...app.element.querySelectorAll(".shop-staged-row")]
-        .find(r => r.textContent.includes("Rare Thing"));
-      if ( report.check("it is back on the counter", !!row) ) {
-        rightClick(row);
+      if ( report.check("double-clicking puts it back on the counter", !!rareRow()) ) {
+        doubleClick(rareRow().querySelector(".shop-staged-name"));
         await settle();
-        report.check("right-clicking the counter row also takes it back", !stagedRare());
+        report.check("double-clicking the counter row takes it back", !rareRow());
       }
 
-      // Right-clicking something that is not an item must not touch the counter.
+      // The counter row has the same menu.
+      doubleClick(rareTile().querySelector(".shop-tile-button"));
+      await settle();
+      if ( rareRow() ) {
+        await rightClick(rareRow());
+        await until(menuOpen);
+        report.check("right-clicking a counter row offers to take it back and to view it",
+          menuLabels().includes(menuText("removeOne")) && menuLabels().includes(menuText("view")),
+          menuLabels().join(" | "));
+        await pickFromMenu(menuText("removeOne"));
+        report.check("and taking it back from there works too", !rareRow());
+      }
+
+      // "View item" opens the compendium entry, as the receipt's link does.
+      await rightClick(rareTile().querySelector(".shop-tile-button"));
+      await until(menuOpen);
+      const expected = rareTile().dataset.sourceUuid;
+      const before = new Set(foundry.applications.instances.keys());
+      await pickFromMenu(menuText("view"));
+      await new Promise(resolve => setTimeout(resolve, 600));
+      const opened = [...foundry.applications.instances.values()].filter(a => !before.has(a.id));
+      const sheet = opened.find(a => a.document?.uuid === expected);
+      report.check("'View item' opens the item's own entry", !!sheet,
+        `expected ${expected}; opened ${opened.map(a => a.document?.uuid ?? a.id).join(", ") || "nothing"}`);
+      for ( const extra of opened ) await extra.close().catch(() => {});
+
+      // Right-clicking something that is not an item opens no menu and leaves the counter alone.
       //
-      // Not asserted on `defaultPrevented`, which an earlier version did: Foundry itself calls
-      // `preventDefault()` on every `contextmenu` event in the game (client/game.mjs), so the
-      // browser's menu never appears anywhere in Foundry and that check could never pass. What
-      // matters is that our handler ignores anything that is not an item.
-      rareTile().querySelector('[data-action="stageLine"]').click();
+      // Not asserted on `defaultPrevented`: Foundry itself calls `preventDefault()` on every
+      // `contextmenu` event in the game (client/game.mjs), so that check could never fail.
+      doubleClick(rareTile().querySelector(".shop-tile-button"));
       await settle();
-      rightClick(app.element.querySelector(".shop-panel-head"));
+      await rightClick(app.element.querySelector(".shop-panel-head"));
       await settle();
-      report.check("right-clicking outside an item leaves the counter alone", stagedRare(),
+      report.check("right-clicking outside an item opens no menu", !menuLabels().length,
+        menuLabels().join(" | "));
+      report.check("and leaves the counter alone", !!rareRow(),
         "a right-click on a panel heading took an item off the counter");
-      rightClick(rareTile().querySelector(".shop-tile-button"));
-      await settle();
+      await closeMenu();
+
+      // Dragging: a counter row back onto its shelf takes the line back; a tile onto the counter
+      // stages it. Synthetic drag events carry a real DataTransfer, which is all the handlers read.
+      const drag = async (from, to) => {
+        const dataTransfer = new DataTransfer();
+        const fire = (element, type) => element.dispatchEvent(
+          new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer }));
+        fire(from, "dragstart");
+        fire(to, "dragover");
+        const highlighted = to.closest(".shop-panel")?.classList.contains("is-drop-target");
+        fire(to, "drop");
+        fire(from, "dragend");
+        await settle();
+        return highlighted;
+      };
+      if ( rareRow() ) {
+        const lit = await drag(rareRow(), app.element.querySelector(".shop-panel--stock .shop-panel-body"));
+        report.check("dragging a counter row over its shelf lights the shelf up", lit);
+        report.check("and dropping it there takes it back off the counter", !rareRow());
+      }
+      const litCounter = await drag(rareTile().querySelector(".shop-tile-button"),
+        app.element.querySelector(".shop-panel--stage .shop-panel-body"));
+      report.check("dragging a tile over the counter lights the counter up", litCounter);
+      report.check("and dropping it there puts it on the counter", !!rareRow());
+      report.check("and leaves no drop highlight behind",
+        !app.element.querySelector(".is-drop-target, .is-dragging"));
+
+      if ( rareRow() ) {
+        await drag(rareRow(), app.element.querySelector(".shop-panel--pack .shop-panel-body"));
+        report.check("a row of something being bought cannot be dropped on the character's pack", !!rareRow());
+        doubleClick(rareRow().querySelector(".shop-staged-name"));
+        await settle();
+      }
     }
 
     // Barter renders a different footer and an extra field.
@@ -611,10 +714,10 @@ export async function shopSuite(mode = "windowed") {
     if ( report.check("the worn cloak is in the pack", !!cloakTile) ) {
       report.check("its tile shows it is equipped", !!cloakTile.querySelector(".shop-tile-status .fa-shield-halved"));
       report.check("and attuned", !!cloakTile.querySelector(".shop-tile-status .fa-sun"));
-      const label = cloakTile.querySelector("[data-action=stageLine]")?.getAttribute("aria-label") ?? "";
+      const label = cloakTile.querySelector(".shop-tile-button")?.getAttribute("aria-label") ?? "";
       report.check("and says so in words, not only icons", /Equipped/.test(label) && /Attuned/.test(label), label);
 
-      cloakTile.querySelector("[data-action=stageLine]")?.click();
+      doubleClick(cloakTile.querySelector(".shop-tile-button"));
       await settle();
       const row = app.element.querySelector('.shop-staged-row[data-side="give"]');
       report.check("staging it warns the state will not go with it", !!row?.querySelector(".shop-staged-status"),
@@ -873,7 +976,7 @@ export async function emberSuite({ mode = "fullscreen", keepOpen = false } = {})
       getComputedStyle(root).fontFamily.includes("Vollkorn"), getComputedStyle(root).fontFamily);
 
     // The windows stay usable, not just recoloured.
-    root.querySelector(".shop-panel--stock .shop-tile [data-action=\"stageLine\"]")?.click();
+    doubleClick(root.querySelector(".shop-panel--stock .shop-tile .shop-tile-button"));
     await settle();
     report.check(`${tag} staging still works under the skin`, !!shop.element.querySelector(".shop-staged-row"));
 

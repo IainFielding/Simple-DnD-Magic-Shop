@@ -7,8 +7,8 @@ import {
   totalCp
 } from "../data/pricing.mjs";
 import {
-  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible, newLinesFromSale, stockKey,
-  transferData
+  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible, newLinesFromSale, sourceUuid,
+  stockKey, transferData
 } from "../data/stock.mjs";
 import {
   bookSpend, getAttitude, purse, recordTrade, stockEntries, stockLimit, stockLine, traderData
@@ -515,8 +515,7 @@ function receiptLine(line) {
     img: line.img,
     qty: line.qty,
     lineCp: line.unitCp * line.qty,
-    uuid: line.item?.flags?.[MODULE_ID]?.enchanted?.template
-      || line.item?._stats?.compendiumSource || line.item?.uuid || ""
+    uuid: sourceUuid(line.item)
   };
 }
 

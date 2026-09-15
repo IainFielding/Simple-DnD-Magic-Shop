@@ -473,7 +473,13 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
   //
   // All three keys carry the image. A folder of copies of one compendium item, each given its own
   // picture, share a source uuid; keyed on that alone they collapsed into a single line.
-  const withImg = (key, doc) => `${key}|${doc?.img ?? ""}`;
+  //
+  // Data with no image of its own is compared as the icon it will be created with. Foundry fills
+  // that in, so the stored copy always has one; compared as "", adding the same image-less data a
+  // second time never matched its own line and took a fresh one — or was refused on a full shelf.
+  const imgOf = doc => doc?.img || Item.implementation?.getDefaultArtwork?.(doc)?.img || "";
+  const withImg = (key, doc) => `${key}|${imgOf(doc)}`;
+  const keyOf = doc => stockKey({ type: doc?.type, name: doc?.name, img: imgOf(doc) });
   const byMade = new Map();
   const bySource = new Map();
   const byIdentity = new Map();
@@ -485,7 +491,7 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
     }
     const source = item._stats?.compendiumSource;
     if ( source ) bySource.set(withImg(source, item), item);
-    byIdentity.set(stockKey(item), item);
+    byIdentity.set(keyOf(item), item);
   }
 
   for ( const entry of sources ) {
@@ -493,7 +499,7 @@ async function addStockData(actor, sources, { qty = 1, line = {} } = {}) {
     // Ready-made data that was not made from anything (an API caller's own item data) is matched the
     // way a hand-made item is: by its compendium source if it names one, else by type and name.
     const subject = entry.item ?? entry.data;
-    const identity = made ? withImg(made, subject) : stockKey(subject);
+    const identity = made ? withImg(made, subject) : keyOf(subject);
     const existing = made
       ? byMade.get(identity)
       : (entry.uuid && bySource.get(withImg(entry.uuid, subject)))

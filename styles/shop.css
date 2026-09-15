@@ -1464,6 +1464,17 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
    can be applied and lifted without touching style attributes. */
 .sogrom-shop .shop-tile.is-filtered { display: none; }
 
+/* Dragging. The thing being moved dims where it started, and whatever it may land on lights up in
+   brass — the colour the counter already uses for "chosen" — so the player can see where to let go
+   before they do. An inset outline, so lighting a panel up never shifts the layout. */
+.sogrom-shop .shop-tile-button[draggable="true"] { cursor: grab; }
+.sogrom-shop .is-dragging { opacity: 0.45; }
+.sogrom-shop .shop-panel.is-drop-target {
+  outline: 2px dashed var(--shop-settled-bright);
+  outline-offset: -4px;
+  background-color: rgba(227, 191, 75, 0.06);
+}
+
 .sogrom-shop .shop-empty--panel { gap: 0.5rem; padding: 1.5rem 0.5rem; }
 .sogrom-shop .shop-empty--panel > i { font-size: 1.75rem; }
 .sogrom-shop .shop-empty--panel p { font-size: 0.82rem; }
@@ -1513,6 +1524,9 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   align-items: center;
   gap: 0.4rem;
   padding: 0.25rem;
+  /* A double-click takes one back; without this it would also select the word under the cursor. */
+  user-select: none;
+  cursor: grab;
   /* The row is allowed to be narrower than its content; the name inside it ellipses. Without
      this the longest item name on the counter would set the column's width. */
   min-width: 0;

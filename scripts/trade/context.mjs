@@ -11,7 +11,7 @@ import {
 } from "../data/pricing.mjs";
 import { getTrader } from "../data/registry.mjs";
 import {
-  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible, stockKey
+  acceptsItem, availableQty, effectiveValueCp, isFixedValue, lineVisible, sourceUuid, stockKey
 } from "../data/stock.mjs";
 import {
   getAttitude, haggleRecordFor, ledgerOf, purse, stockEntries, stockLimit, traderData
@@ -346,6 +346,9 @@ function visibleStock(trader, attitude, multipliers, fixedValue) {
     out.push({
       id,
       uuid: item.uuid,
+      // What "View item" opens: the compendium entry, which a player can read, rather than the
+      // Trader's copy, which they cannot.
+      sourceUuid: sourceUuid(item),
       name: item.name,
       img: item.img,
       type: item.type,
@@ -404,6 +407,7 @@ function sellableInventory(trader, actor, multipliers, fixedValue) {
     out.push({
       id: item.id,
       uuid: item.uuid,
+      sourceUuid: sourceUuid(item),
       name: item.name,
       img: item.img,
       type: item.type,

@@ -43,12 +43,10 @@ export class ShopApp extends ShopShellBase {
       icon: "fa-solid fa-scale-balanced"
     },
     actions: {
-      stageLine: ShopApp.#onStageLine,
       unstageLine: ShopApp.#onUnstageLine,
       clearCounter: ShopApp.#onClearCounter,
       setMode: ShopApp.#onSetMode,
       confirmTrade: ShopApp.#onConfirmTrade,
-      openLineItem: ShopApp.#onOpenLineItem,
       refresh: ShopApp.#onRefresh,
       toggleHistory: ShopApp.#onToggleHistory,
       haggle: ShopApp.#onHaggle
@@ -237,6 +235,7 @@ export class ShopApp extends ShopShellBase {
     return {
       id: line.id,
       uuid: line.uuid,
+      sourceUuid: line.sourceUuid ?? "",
       name: line.name,
       img: line.img,
       rarity: line.rarity,
@@ -305,6 +304,7 @@ export class ShopApp extends ShopShellBase {
         statusNote: side === "give" ? this.#statusNote(line) : "",
         id: line.id,
         uuid: line.uuid,
+        sourceUuid: line.sourceUuid ?? "",
         name: line.name,
         img: line.img,
         rarity: line.rarity,
@@ -357,7 +357,7 @@ export class ShopApp extends ShopShellBase {
     this.#wireSearch();
     this.#wireCoinFields();
     this.#wirePayer();
-    this.#wireRightClick();
+    this.#wireItemGestures();
     this.#restoreFocus();
   }
 
@@ -375,37 +375,246 @@ export class ShopApp extends ShopShellBase {
     } catch {}
   }
 
-  /** Whether the right-click listener is attached. The root element outlives each render. */
-  #rightClickWired = false;
+  /** Whether the item gestures are attached. The root element outlives each render. */
+  #gesturesWired = false;
+
+  /** What is being dragged, while a drag started in this window is in flight. */
+  #drag = null;
 
   /**
-   * Right-click an item to take it back off the counter — the mirror of left-click putting it on.
-   *
-   * Works on both a tile in either panel and a row on the counter itself, since both are "the
-   * item" and a player reaching to undo will click whichever is nearer. Shift takes back five,
-   * matching shift-click adding five.
-   *
-   * A native `contextmenu` listener, because ApplicationV2's `actions` only route clicks. Wired
-   * once on the root element with delegation: that element survives re-renders while the tiles
-   * inside it do not, so per-render wiring would stack a listener per render.
-   *
-   * The browser's own menu is suppressed only when the pointer is actually on an item, so a
-   * right-click anywhere else in the window still behaves normally.
+   * The drag payload's type. Our own, rather than Foundry's `text/plain` JSON, on purpose: a tile
+   * dragged out of the window must mean nothing to a character sheet or the canvas. Given Foundry's
+   * `{type: "Item", uuid}` it would be a free copy of the Trader's item for whoever dropped it.
    */
-  #wireRightClick() {
-    if ( this.#rightClickWired ) return;
-    this.#rightClickWired = true;
-    this.element.addEventListener("contextmenu", event => {
-      const item = event.target.closest(".shop-tile[data-item-id], .shop-staged-row[data-item-id]");
-      if ( !item || !this.element.contains(item) ) return;
-      event.preventDefault();
+  static DRAG_TYPE = `application/x-${MODULE_ID}-line`;
 
-      const side = item.closest("[data-side]")?.dataset.side;
-      const id = item.dataset.itemId;
-      if ( !side || !id || this.#settling ) return;
-      const step = event.shiftKey ? 5 : 1;
-      if ( this.#state.stage(side, id, -step) ) this.render();
+  /** Items on the shelves or in the pack, and rows on the counter: everything the gestures act on. */
+  static ITEM_SELECTOR = ".shop-tile[data-item-id], .shop-staged-row[data-item-id]";
+
+  /**
+   * How a player moves goods on and off the counter. A single click deliberately does nothing.
+   *
+   *  - **Double-click** a tile to put one on the counter; double-click a counter row to take one
+   *    back. Shift makes it five, for arrows and rations.
+   *  - **Right-click** either for a menu: put one or several on the counter, take one or all back,
+   *    or view the item.
+   *  - **Drag** a tile onto the counter to put one there (shift: five), or a counter row off it to
+   *    take that line back entirely.
+   *
+   * All of it is delegated from the root element and wired once, because that element survives a
+   * re-render while the tiles inside it do not; wiring per render would stack a listener per render.
+   */
+  #wireItemGestures() {
+    if ( this.#gesturesWired ) return;
+    this.#gesturesWired = true;
+    const root = this.element;
+
+    root.addEventListener("dblclick", event => this.#onItemDoubleClick(event));
+
+    new foundry.applications.ux.ContextMenu(root, ShopApp.ITEM_SELECTOR, this.#menuEntries(), {
+      jQuery: false,
+      // Fixed, so the menu is drawn in the page's top layer: injected into the tile it would be
+      // clipped by the panel's scroll box, and hidden under the full-screen shop.
+      fixed: true
     });
+
+    root.addEventListener("dragstart", event => this.#onItemDragStart(event));
+    root.addEventListener("dragend", () => this.#endDrag());
+    root.addEventListener("dragover", event => this.#onItemDragOver(event));
+    root.addEventListener("dragleave", event => {
+      const zone = event.target.closest?.(".is-drop-target");
+      if ( zone && !zone.contains(event.relatedTarget) ) zone.classList.remove("is-drop-target");
+    });
+    root.addEventListener("drop", event => this.#onItemDrop(event));
+  }
+
+  /**
+   * The item an event landed on, and which side of the counter it belongs to.
+   * @param {HTMLElement} element
+   * @returns {{element: HTMLElement, id: string, side: string, row: boolean, sourceUuid: string}|null}
+   */
+  #itemAt(element) {
+    const item = element?.closest?.(ShopApp.ITEM_SELECTOR);
+    if ( !item || !this.element.contains(item) ) return null;
+    const side = item.closest("[data-side]")?.dataset.side;
+    const id = item.dataset.itemId;
+    if ( !side || !id ) return null;
+    return {
+      element: item, id, side,
+      row: item.classList.contains("shop-staged-row"),
+      sourceUuid: item.dataset.sourceUuid ?? ""
+    };
+  }
+
+  /** Change a line on the counter and redraw, unless a confirmation is already on its way. */
+  #stage(side, id, delta) {
+    if ( this.#settling || !delta ) return;
+    if ( this.#state.stage(side, id, delta) ) this.render();
+  }
+
+  /** Double-click: a tile goes on the counter, a counter row comes back off it. */
+  #onItemDoubleClick(event) {
+    // The row's own minus button already takes one back; a quick double press of it must not
+    // also count as a double-click on the row and take two more.
+    if ( event.target.closest("button:not(.shop-tile-button), input, select, a") ) return;
+    const item = this.#itemAt(event.target);
+    if ( !item ) return;
+    const step = event.shiftKey ? 5 : 1;
+    this.#stage(item.side, item.id, item.row ? -step : step);
+  }
+
+  /** The right-click menu, shared by tiles and counter rows; each entry decides where it shows. */
+  #menuEntries() {
+    const at = target => this.#itemAt(target);
+    const staged = target => {
+      const item = at(target);
+      return item ? this.#state.staged(item.side, item.id) : 0;
+    };
+    const room = target => {
+      const item = at(target);
+      return item && !item.row ? this.#state.remaining(item.side, item.id) : 0;
+    };
+    return [
+      {
+        label: t("shop.menu.addOne"),
+        icon: '<i class="fa-solid fa-plus"></i>',
+        visible: target => room(target) > 0,
+        onClick: (_event, target) => {
+          const item = at(target);
+          if ( item ) this.#stage(item.side, item.id, 1);
+        }
+      },
+      {
+        label: t("shop.menu.addSome"),
+        icon: '<i class="fa-solid fa-layer-group"></i>',
+        visible: target => room(target) > 1,
+        onClick: (_event, target) => this.#promptAdd(at(target))
+      },
+      {
+        label: t("shop.menu.removeOne"),
+        icon: '<i class="fa-solid fa-minus"></i>',
+        visible: target => staged(target) > 0,
+        onClick: (_event, target) => {
+          const item = at(target);
+          if ( item ) this.#stage(item.side, item.id, -1);
+        }
+      },
+      {
+        label: t("shop.menu.removeAll"),
+        icon: '<i class="fa-solid fa-xmark"></i>',
+        visible: target => staged(target) > 1,
+        onClick: (_event, target) => {
+          const item = at(target);
+          if ( item ) this.#stage(item.side, item.id, -this.#state.staged(item.side, item.id));
+        }
+      },
+      {
+        label: t("shop.menu.view"),
+        icon: '<i class="fa-solid fa-book-open"></i>',
+        visible: target => !!at(target)?.sourceUuid,
+        onClick: (event, target) => this.#viewItem(at(target)?.sourceUuid, event)
+      }
+    ];
+  }
+
+  /**
+   * Ask how many to put on the counter, capped at what is left of the line.
+   * @param {{side: string, id: string, element: HTMLElement}|null} item
+   */
+  async #promptAdd(item) {
+    if ( !item ) return;
+    const room = this.#state.remaining(item.side, item.id);
+    if ( room <= 0 ) return;
+    const name = foundry.utils.escapeHTML(item.element.dataset.name ?? "");
+    const max = Number.isFinite(room) ? room : 999;
+    const qty = await foundry.applications.api.DialogV2.prompt({
+      window: { title: t("shop.menu.addSomeTitle"), icon: "fa-solid fa-layer-group" },
+      classes: ["sogrom-shop-dialog"],
+      content: `<p>${t("shop.menu.addSomeBody", { name })}</p>
+        <input type="number" name="qty" value="1" min="1" max="${max}" step="1" inputmode="numeric" autofocus>`,
+      ok: {
+        label: t("shop.menu.addSomeButton"),
+        icon: "fa-solid fa-plus",
+        callback: (_event, button) => Math.floor(Number(button.form.elements.qty.value) || 0)
+      },
+      rejectClose: false
+    });
+    // The stock may have moved while the dialog was open; `stage` clamps to what is left anyway.
+    if ( qty > 0 ) this.#stage(item.side, item.id, Math.min(qty, max));
+  }
+
+  /**
+   * Open an item the way a link on a receipt does: its compendium entry, shown through Foundry's
+   * own document-link handling, so "View item" and the receipt open exactly the same thing.
+   *
+   * The uuid is chosen on the GM's side (`data/stock.mjs#sourceUuid`) because a player cannot read
+   * the Trader — but they *can* read the compendium the item came from.
+   * @param {string} uuid
+   * @param {Event} event
+   */
+  async #viewItem(uuid, event) {
+    if ( !uuid ) return;
+    const doc = await fromUuid(uuid).catch(() => null);
+    if ( !doc?.sheet ) return void ui.notifications.warn(t("shop.menu.viewMissing"));
+    // Claimed before rendering, so the sheet is lifted whichever render lands first — see
+    // app/takeover.mjs.
+    yieldTakeoverTo(doc.sheet);
+    doc._onClickDocumentLink(event);
+  }
+
+  /** Start dragging a tile toward the counter, or a counter row away from it. */
+  #onItemDragStart(event) {
+    const item = this.#itemAt(event.target);
+    if ( !item ) return;
+    // Nothing to move: a refused tile, one already all on the counter, or a deal being confirmed.
+    if ( this.#settling || (!item.row && this.#state.remaining(item.side, item.id) <= 0) ) {
+      event.preventDefault();
+      return;
+    }
+    this.#drag = item;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(ShopApp.DRAG_TYPE, JSON.stringify({ side: item.side, id: item.id, row: item.row }));
+    item.element.classList.add("is-dragging");
+  }
+
+  /**
+   * Where the drag in flight may land: a tile on the counter, a counter row on the panel its line
+   * came from. Anywhere else is not a drop target, so the cursor says so before the player lets go.
+   * @param {DragEvent} event
+   * @returns {HTMLElement|null}
+   */
+  #dropZone(event) {
+    const drag = this.#drag;
+    if ( !drag || !event.dataTransfer?.types?.includes(ShopApp.DRAG_TYPE) ) return null;
+    // Not while the counter is showing past dealings: the item would land somewhere out of sight.
+    if ( !drag.row ) return event.target.closest?.(".shop-panel--stage:not(.is-history)") ?? null;
+    const panel = event.target.closest?.(".shop-panel[data-side]");
+    return panel?.dataset.side === drag.side ? panel : null;
+  }
+
+  #onItemDragOver(event) {
+    const zone = this.#dropZone(event);
+    if ( !zone ) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    zone.classList.add("is-drop-target");
+  }
+
+  #onItemDrop(event) {
+    const zone = this.#dropZone(event);
+    const drag = this.#drag;
+    this.#endDrag();
+    if ( !zone || !drag ) return;
+    event.preventDefault();
+    if ( drag.row ) this.#stage(drag.side, drag.id, -this.#state.staged(drag.side, drag.id));
+    else this.#stage(drag.side, drag.id, event.shiftKey ? 5 : 1);
+  }
+
+  /** Clear a drag's leftovers, whether it dropped, was cancelled, or left the window. */
+  #endDrag() {
+    this.#drag?.element?.classList.remove("is-dragging");
+    this.#drag = null;
+    for ( const zone of this.element.querySelectorAll(".is-drop-target") ) zone.classList.remove("is-drop-target");
   }
 
   /**
@@ -552,15 +761,6 @@ export class ShopApp extends ShopShellBase {
   /*  Actions                                     */
   /* -------------------------------------------- */
 
-  /** A tile click stages one; shift-click stages five, which is what stacking arrows needs. */
-  static #onStageLine(event, target) {
-    const id = target.closest("[data-item-id]")?.dataset.itemId;
-    const side = target.closest("[data-side]")?.dataset.side;
-    if ( !id || !side ) return;
-    const step = event.shiftKey ? 5 : 1;
-    if ( this.#state.stage(side, id, step) ) this.render();
-  }
-
   static #onUnstageLine(event, target) {
     const id = target.closest("[data-item-id]")?.dataset.itemId;
     const side = target.closest("[data-side]")?.dataset.side;
@@ -697,24 +897,6 @@ export class ShopApp extends ShopShellBase {
     if ( !totals.accepted ) return t("shop.barterShort", { amount: totals.balance });
     if ( !totals.affordable ) return t("shop.cannotAfford");
     return "";
-  }
-
-  /**
-   * Open an item's sheet from a tile.
-   *
-   * Uses the uuid from the payload rather than looking the item up on the Trader, because a
-   * player cannot read the Trader — but they *can* read the compendium the item came from,
-   * which is where the uuid points.
-   */
-  static async #onOpenLineItem(_event, target) {
-    const uuid = target.closest("[data-uuid]")?.dataset.uuid;
-    if ( !uuid ) return;
-    const item = await fromUuid(uuid).catch(() => null);
-    if ( !item?.sheet ) return;
-    // Claimed before rendering, so the sheet is lifted whichever render lands first — see
-    // app/takeover.mjs.
-    yieldTakeoverTo(item.sheet);
-    item.sheet.render(true);
   }
 
   /* -------------------------------------------- */

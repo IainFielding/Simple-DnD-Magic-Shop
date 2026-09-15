@@ -84,6 +84,18 @@ describe("ShopState staging", () => {
     state.stage("give", "dagger", 9);
     expect(state.staged("give", "dagger")).toBe(2);
   });
+
+  it("says how many more of a line could go on the counter", () => {
+    expect(state.remaining("take", "sword")).toBe(3);
+    state.stage("take", "sword", 2);
+    expect(state.remaining("take", "sword")).toBe(1);
+    state.stage("take", "sword", 1);
+    expect(state.remaining("take", "sword")).toBe(0);
+    expect(state.remaining("take", "rations")).toBe(Infinity);
+    // Refused and unknown lines have no room at all, so the menu never offers to add them.
+    expect(state.remaining("give", "relic")).toBe(0);
+    expect(state.remaining("take", "does-not-exist")).toBe(0);
+  });
 });
 
 describe("ShopState.adopt", () => {

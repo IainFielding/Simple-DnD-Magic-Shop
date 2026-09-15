@@ -1,4 +1,6 @@
-import { FIXED_VALUE_LOOT, PHYSICAL_TYPES, RARITIES, clamp, maxStockLines, normalizeRarity } from "../config.mjs";
+import {
+  FIXED_VALUE_LOOT, MODULE_ID, PHYSICAL_TYPES, RARITIES, clamp, maxStockLines, normalizeRarity
+} from "../config.mjs";
 import { copperPerUnit, itemValueCp, toCopper } from "./pricing.mjs";
 
 /**
@@ -140,6 +142,26 @@ export function availableQty(item, line) {
  */
 export function stockRoom(lineCount, max = maxStockLines()) {
   return Math.max(0, max - Math.max(0, Math.floor(Number(lineCount) || 0)));
+}
+
+/**
+ * The document to show someone who asks to see an item: its compendium entry where it has one.
+ *
+ * Shared by the receipt's link and the shop's "View item", so the two always open the same thing.
+ * The traded copy is the last resort, not the first: it lives on a Trader the player cannot open,
+ * and buying the last of a line deletes it.
+ *
+ *  - An item made from a magic item template shows the **template**: a Flame Tongue should open
+ *    the Flame Tongue, not the plain longsword it was built on.
+ *  - Anything else shows where it was copied from.
+ *  - A scroll the shop wrote with nothing else to point at shows its spell.
+ *  - Something hand-made that never came from a compendium falls back to the item itself.
+ * @param {object} item  A document or its data.
+ * @returns {string}  "" when there is nothing at all to point at.
+ */
+export function sourceUuid(item) {
+  const madeFrom = item?.flags?.[MODULE_ID]?.madeFrom;
+  return madeFrom?.template || item?._stats?.compendiumSource || madeFrom?.spell || item?.uuid || "";
 }
 
 /**

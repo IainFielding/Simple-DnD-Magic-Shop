@@ -5,10 +5,14 @@
 
   `side` comes from the row data, not from the enclosing panel, because both columns live inside
   the same part and a `data-side` on the wrapper would be ambiguous.
+
+  Double-click takes one back, and the row can be dragged off the counter onto the panel it came
+  from to take the whole line back — see `ShopApp#wireItemGestures`.
 --}}
-<li class="shop-staged-row{{#if rarity}} rarity-{{rarity}}{{/if}}"
-    data-item-id="{{id}}" data-side="{{side}}" data-uuid="{{uuid}}">
-  <img class="shop-staged-img" src="{{img}}" alt="" data-tooltip="{{shopItemTooltip uuid}}">
+<li class="shop-staged-row{{#if rarity}} rarity-{{rarity}}{{/if}}" draggable="true"
+    data-item-id="{{id}}" data-side="{{side}}" data-uuid="{{uuid}}" data-source-uuid="{{sourceUuid}}"
+    data-name="{{name}}">
+  <img class="shop-staged-img" src="{{img}}" alt="" draggable="false" data-tooltip="{{shopItemTooltip uuid}}">
   <span class="shop-staged-main">
     <span class="shop-staged-name">{{name}}</span>
     {{!-- Hover the price for where it comes from. --}}
