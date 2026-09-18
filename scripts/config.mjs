@@ -173,13 +173,40 @@ export const FIXED_VALUE_LOOT = Object.freeze(["gem", "art", "trade"]);
  * @param {object} payload  The single object argument handed to listeners.
  */
 export function fireHook(hook, payload) {
-  log(`hook ${hook}`, payload);
+  log(`hook ${hook}`, summarizePayload(payload));
   try {
     Hooks.callAll(hook, payload);
   } catch ( err ) {
     // Foundry already reports a throwing listener; this only stops it unwinding *our* call stack.
     log(`listener threw on ${hook}`, err);
   }
+}
+
+/**
+ * A hook payload as flat values, for the debug log.
+ *
+ * The console keeps every object it is handed alive, so that it can be expanded later. Logging the
+ * payload itself therefore pinned every shop window and document a hook ever carried for as long
+ * as the console kept the line: with debug logging on, no closed shop was ever collected. Names
+ * and ids say as much in the log and hold nothing.
+ * @param {object} payload
+ * @returns {Record<string, *>}
+ */
+export function summarizePayload(payload) {
+  if ( !payload || typeof payload !== "object" ) return payload;
+  const out = {};
+  for ( const [key, value] of Object.entries(payload) ) out[key] = summarizeValue(value);
+  return out;
+}
+
+/** One payload value, reduced to something that holds no reference to anything. */
+function summarizeValue(value) {
+  if ( typeof value === "function" ) return "[function]";
+  if ( value === null || typeof value !== "object" ) return value;
+  if ( Array.isArray(value) ) return `[${value.length} item(s)]`;
+  if ( value.documentName ) return `${value.documentName} "${value.name ?? ""}" (${value.id ?? "?"})`;
+  if ( typeof value.render === "function" ) return `${value.constructor?.name ?? "Application"} #${value.id ?? "?"}`;
+  return `{${Object.keys(value).join(", ")}}`;
 }
 
 /**
@@ -194,7 +221,7 @@ export function fireHook(hook, payload) {
  * @returns {boolean}       False when a listener vetoed; true to carry on.
  */
 export function fireCancellableHook(hook, payload) {
-  log(`hook ${hook} (cancellable)`, payload);
+  log(`hook ${hook} (cancellable)`, summarizePayload(payload));
   let allowed = true;
   try {
     allowed = Hooks.call(hook, payload) !== false;

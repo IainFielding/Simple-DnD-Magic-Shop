@@ -182,7 +182,7 @@
    --- The portrait ring --------------------------------------------
    Ember rings actor portraits with this art. Ember applies it as a `border-image`, sliced at 36px
    of a 109px ring — which only reads as a circle on portraits about that size. On the shop's
-   300px portraits the slice's straight edge sections stretch, and the ring comes out a rounded
+   far larger portraits the slice's straight edge sections stretch, and the ring comes out a rounded
    square (it did; the screenshots showed it). So the whole image is laid over the portrait as a
    single overlay instead, scaled uniformly: a true circle at any size, with the band thickening
    in proportion exactly as the art was drawn.

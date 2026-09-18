@@ -8,7 +8,8 @@
     "provision": "node provision.mjs",
     "test": "node run.mjs",
     "test:bare": "node run.mjs --world=magicshop-bare",
-    "hold": "node run.mjs --hold"
+    "hold": "node run.mjs --hold",
+    "memory": "node memory.mjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"

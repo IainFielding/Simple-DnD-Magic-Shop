@@ -47,8 +47,8 @@ export const CONTENT_MODULES = [
 
 /** The system the test worlds run, and the version this harness was written against. */
 export const SYSTEM = "dnd5e";
-export const SYSTEM_VERSION = "6.0.1";
-export const CORE_VERSION = "14.367";
+export const SYSTEM_VERSION = "6.0.3";
+export const CORE_VERSION = "14.368";
 
 /**
  * The test worlds. `id` doubles as the directory name under `Data/worlds`.

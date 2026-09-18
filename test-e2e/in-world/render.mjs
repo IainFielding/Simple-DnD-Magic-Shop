@@ -368,9 +368,15 @@ export async function shopSuite(mode = "windowed") {
       const rect = img.getBoundingClientRect();
       return `${Math.round(rect.width)}x${Math.round(rect.height)}`;
     });
-    report.check("both portraits are shown at 300x300",
-      portraits.length === 2 && portraits.every(size => size === "300x300"),
+    report.check("both portraits are shown at 204x204",
+      portraits.length === 2 && portraits.every(size => size === "204x204"),
       `portraits measure ${portraits.join(", ") || "nothing"}`);
+
+    // The portraits set the bar's height, and every pixel of it comes out of the shelves. It was
+    // cut by 30% (from ~325px) to give the stock more room; keep it there.
+    const barHeight = Math.round(root.querySelector(".shop-topbar--shop")?.getBoundingClientRect().height ?? 0);
+    report.check("the top bar stays short enough to leave the shelves their room",
+      barHeight > 0 && barHeight <= 240, `the top bar is ${barHeight}px tall`);
 
     // The rate line is worded from the Trader's side — it buys your goods low and sells to you
     // high — so the "buying" figure must be the smaller one. Asserted on the relationship rather
@@ -965,8 +971,8 @@ export async function emberSuite({ mode = "fullscreen", keepOpen = false } = {})
     report.check(`${tag} and are clipped to a circle`,
       !!portrait && getComputedStyle(portrait).borderRadius === "50%", getComputedStyle(portrait).borderRadius);
     const rect = portrait?.getBoundingClientRect();
-    report.check(`${tag} and are still 300x300`,
-      Math.round(rect?.width) === 300 && Math.round(rect?.height) === 300,
+    report.check(`${tag} and are still 204x204`,
+      Math.round(rect?.width) === 204 && Math.round(rect?.height) === 204,
       `${Math.round(rect?.width)}x${Math.round(rect?.height)}`);
 
     const heading = root.querySelector(".shop-party-name");

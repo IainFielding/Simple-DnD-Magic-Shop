@@ -123,8 +123,10 @@
      were about to click next. */
   --shop-stage-w: 232px;
   /* The two portraits in the shop's top bar — who you are, and who you are dealing with. Large,
-     because the Trader is a character the GM has dressed, not an icon. */
-  --shop-portrait: 300px;
+     because the Trader is a character the GM has dressed, not an icon — but they set the bar's
+     height, and every pixel of it is taken from the shelves. 204px makes the bar 30% shorter than
+     the 300px portraits did (~228px against ~325px with its padding). */
+  --shop-portrait: 204px;
 
   color: var(--shop-text);
   font-family: var(--shop-font-body);
@@ -1888,7 +1890,7 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
 }
 
 @media (max-width: 1100px) {
-  /* Two 300px portraits plus the attitude meter between them no longer fit across the bar, and
+  /* Two full-size portraits plus the attitude meter between them no longer fit across the bar, and
      every pixel the bar grows is taken from the panels below it. */
   .sogrom-shop { --shop-portrait: 160px; }
 

@@ -443,6 +443,23 @@ export async function templateCatalogue(pool) {
     .sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang) || a.packLabel.localeCompare(b.packLabel));
 }
 
+/**
+ * How many uuids the template cache has checked, how many documents it holds, and how many of
+ * those are not hollow templates at all (which should be none). Exposed for the harness's memory
+ * suite.
+ * @returns {{checked: number, held: number, stray: number}}
+ */
+export function templateCacheStats() {
+  let held = 0;
+  let stray = 0;
+  for ( const doc of templateCache.values() ) {
+    if ( !doc ) continue;
+    held++;
+    if ( !isHollowTemplate(doc) ) stray++;
+  }
+  return { checked: templateCache.size, held, stray };
+}
+
 /** Drop every cache. Exposed for the harness, which enables packs mid-session. */
 export function clearEnchantCaches() {
   baseCache = null;
@@ -703,15 +720,21 @@ export async function expandPool(pool) {
   const bases = candidates.length ? await baseItems() : [];
   const missing = candidates.map(e => e.uuid).filter(uuid => !templateCache.has(uuid));
   if ( missing.length ) {
+    // Only a hollow template is kept. Most candidates are finished magic items the index could not
+    // rule out, and holding their whole documents for the session pins them in memory long after
+    // Foundry's own compendium cache would have let them go. A null still records "looked, not one".
     const docs = await loadByUuid(missing);
-    for ( const uuid of missing ) templateCache.set(uuid, docs.get(uuid) ?? null);
+    for ( const uuid of missing ) {
+      const doc = docs.get(uuid);
+      templateCache.set(uuid, doc && isHollowTemplate(doc) ? doc : null);
+    }
   }
 
   const replaced = new Set();
   const made = [];
   for ( const entry of candidates ) {
     const doc = templateCache.get(entry.uuid);
-    if ( !doc || !isHollowTemplate(doc) ) continue;
+    if ( !doc ) continue;
     const entries = templateEntries({ template: doc, uuid: entry.uuid, pack: entry.pack, packLabel: entry.packLabel, bases });
     replaced.add(entry.uuid);
     made.push(...entries);
