@@ -68,6 +68,9 @@
   --shop-faint: #767b88;
   /* One semantic red for destructive actions, rejections and unaffordable prices. */
   --shop-danger: #ec7082;
+  /* One semantic amber for advice: something the player may want to know before buying, which
+     stops nothing — unlike --shop-danger, which is a refusal. */
+  --shop-caution: #e8b04a;
   /* One semantic green for a credit — what a sale pays, a balance in the player's favour.
      Distinct from --shop-settled because "money coming to you" and "chosen" are not the
      same idea, and a receipt has to show both at once. */
@@ -1986,6 +1989,21 @@ body:has(.sogrom-shop-fullscreen) #dice-box-canvas {
   font-size: 0.6rem;
   line-height: 1.35;
   color: var(--shop-open-bright);
+  background: rgba(13, 14, 17, 0.92);
+  border: 1px solid var(--shop-line-2);
+}
+
+/* "You are not proficient", bottom left of a shelf tile: the one corner the staged badge (top left),
+   the count (bottom right) and the pack's status icons (top right) leave free. Its own tooltip says
+   what the warning is; the tile's own tooltip is the item card. */
+.sogrom-shop .shop-tile-caution {
+  position: absolute;
+  left: -1px;
+  bottom: -1px;
+  padding: 0 0.2rem;
+  font-size: 0.6rem;
+  line-height: 1.35;
+  color: var(--shop-caution);
   background: rgba(13, 14, 17, 0.92);
   border: 1px solid var(--shop-line-2);
 }

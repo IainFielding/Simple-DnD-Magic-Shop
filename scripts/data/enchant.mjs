@@ -1,6 +1,11 @@
-import { MODULE_ID, PHYSICAL_TYPES, log, normalizeRarity } from "../config.mjs";
+import { MODULE_ID, PHYSICAL_TYPES, itemRarity, log, normalizeRarity } from "../config.mjs";
 import { itemValueCp, toCopper } from "./pricing.mjs";
 import { cpToPriceParts } from "./stock.mjs";
+import { attunementRestriction } from "./usability.mjs";
+import {
+  SHELL_PROFILE, baseMatchesRule, baseRuleFor, headlineRarity, isShell, linkedBaseUuids, shellBases,
+  shellName
+} from "./template-bases.mjs";
 
 /**
  * Real magic items from the Dungeon Master's Guide's templates, and real scrolls from spells.
@@ -92,6 +97,24 @@ function changeTo(effect, key) {
 }
 
 /**
+ * The rarity an enchantment sets, normalised. dnd5e 6.0.2 migrated a change to `system.rarity` into
+ * one to `system.rarities`, whose value may be one key, a list, or a list written as JSON text.
+ * @param {object} effect
+ * @returns {string}  "" when it sets none.
+ */
+function rarityChange(effect) {
+  const single = normalizeRarity(changeTo(effect, "system.rarity"));
+  if ( single ) return single;
+  let value = changeTo(effect, "system.rarities");
+  if ( (typeof value === "string") && value.trim().startsWith("[") ) {
+    try { value = JSON.parse(value); } catch { value = ""; }
+  }
+  if ( Array.isArray(value) ) value = value[0];
+  if ( typeof value === "string" ) value = value.split(",")[0];
+  return normalizeRarity(value);
+}
+
+/**
  * @typedef {object} EnchantProfile
  * @property {string} key            `activityId.profileId`, unique within the template.
  * @property {string} activityId
@@ -130,7 +153,9 @@ export function enchantProfiles(template) {
     }
   }
 
-  const templateRarity = normalizeRarity(template?.system?.rarity);
+  // A template that sets no rarity of its own may still say it: in `system.rarities`, or in the
+  // headline of its description ("Weapon (Any Sword), Rare").
+  const templateRarity = itemRarity(template) || headlineRarity(template);
   const out = [];
   for ( const activity of activities ) {
     const activityId = activity._id ?? activity.id;
@@ -150,7 +175,7 @@ export function enchantProfiles(template) {
         activityId,
         profileId,
         name: effect.name ?? "",
-        rarity: normalizeRarity(changeTo(effect, "system.rarity")) || templateRarity,
+        rarity: rarityChange(effect) || templateRarity,
         priceAdd: Number.isFinite(addValue) && addValue > 0
           ? { value: addValue, denomination: typeof addDenomination === "string" ? addDenomination : "gp" }
           : null,
@@ -203,6 +228,7 @@ export function isHollowTemplate(template) {
  * @property {string} type
  * @property {string} subtype
  * @property {string[]} properties
+ * @property {string[]} [damageTypes]  The base damage types, which a shell's wording can name.
  * @property {number} valueCp
  */
 
@@ -223,6 +249,77 @@ export function eligibleBases(profile, type, bases) {
     if ( !allowMagical && base.properties.includes("mgc") ) return false;
     return true;
   });
+}
+
+/**
+ * Whether an item is something this module builds a real item from: a hollow template, or a shell
+ * (see `data/template-bases.mjs#isShell`). A template that is also a shell is a template — its
+ * enchantment describes it better than its headline does.
+ * @param {object} item
+ * @returns {boolean}
+ */
+export function isMakeable(item) {
+  return isHollowTemplate(item) || isShell(item);
+}
+
+/**
+ * A shell's one "enchantment", shaped like an {@link EnchantProfile} so the dialog, the generator and
+ * the API treat it like any other. It has nothing to apply; its price is the shell's own listed price
+ * when it has one, which is added to the base's as an enchantment's is, and otherwise its rarity's.
+ * @param {object} shell
+ * @returns {EnchantProfile}
+ */
+export function shellProfile(shell) {
+  const ownCp = itemValueCp(shell?.system?.price);
+  return {
+    key: SHELL_PROFILE,
+    activityId: "",
+    profileId: "",
+    name: shell?.name ?? "",
+    rarity: itemRarity(shell) || headlineRarity(shell),
+    priceAdd: ownCp > 0 ? { value: ownCp, denomination: "cp" } : null,
+    restrictions: { type: "", categories: [], properties: [], allowMagical: false },
+    riders: { activity: [], effect: [] }
+  };
+}
+
+/**
+ * What can be made from a template or a shell: each enchantment, with the bases it may go on.
+ *
+ * A template's bases are narrowed by its description before dnd5e's own rules are applied: the bases
+ * its headline links when it links any (Frost Brand's six swords), otherwise those its wording allows
+ * ("Any Medium or Heavy, Except Hide"). Links that resolve to nothing it can use fall back to the
+ * wording, so a headline linking an item from a pack that is switched off is no worse than one
+ * linking nothing. A shell's bases are the ones its headline names.
+ * @param {object} params
+ * @param {object} params.template       The template or shell, document or data.
+ * @param {BaseSummary[]} params.bases   dnd5e's base weapons, armour, shields and ammunition.
+ * @param {BaseSummary[]} [params.linked]  The bases the headline links, resolved.
+ * @returns {{profile: EnchantProfile, bases: BaseSummary[]}[]}  Only enchantments with a base.
+ */
+export function templateBaseChoices({ template, bases = [], linked = [] }) {
+  if ( isHollowTemplate(template) ) {
+    const profiles = enchantProfiles(template);
+    const choose = candidates => profiles
+      .map(profile => ({ profile, bases: eligibleBases(profile, baseTypeFor(profile, template), candidates) }))
+      .filter(choice => choice.bases.length);
+    if ( linked.length ) {
+      const fromLinks = choose(linked);
+      if ( fromLinks.length ) return fromLinks;
+    }
+    // No rule (a wand, a ring) leaves the bases as dnd5e's restrictions alone would have them — and so
+    // does wording that rules out everything, which is homebrew phrasing this could not read rather
+    // than a template meant for nothing.
+    const rule = baseRuleFor(template);
+    const worded = rule ? choose(bases.filter(base => baseMatchesRule(base, rule))) : [];
+    return worded.length ? worded : choose(bases);
+  }
+  if ( isShell(template) ) {
+    const profile = shellProfile(template);
+    const found = profile.rarity ? shellBases(template, bases) : [];
+    return found.length ? [{ profile, bases: found }] : [];
+  }
+  return [];
 }
 
 /**
@@ -328,15 +425,96 @@ export function enchantedItemData({ base, baseUuid, template, templateUuid, prof
     if ( extra > 0 ) data.system.price = cpToPriceParts(itemValueCp(data.system?.price) + extra);
   }
 
+  // Who may attune lives in the template's text ("Requires Attunement by a Paladin"), and the made item
+  // carries the base's description instead, so the phrase is kept where the shop can still read it.
+  const attunement = attunementRestriction(template?.system?.description?.value)?.who;
   data._stats = { ...data._stats, compendiumSource: baseUuid ?? null };
   data.flags = {
     ...data.flags,
     [MODULE_ID]: {
       ...data.flags?.[MODULE_ID],
-      madeFrom: { template: templateUuid, profile: profile.key, base: baseUuid ?? "" }
+      madeFrom: { template: templateUuid, profile: profile.key, base: baseUuid ?? "", ...(attunement ? { attunement } : {}) }
     }
   };
   return data;
+}
+
+/** dnd5e's own keys for the normalised rarities that differ. */
+const SYSTEM_RARITY = { veryrare: "veryRare" };
+
+/**
+ * The creation data for a shell made real: the base item, renamed and re-described as the shell, made
+ * magical at the shell's rarity, carrying the shell's own activities and effects. The base's attack
+ * stays; a shell's empty attack (one with no damage of its own) is left out so it is not listed twice.
+ *
+ * Recorded as made from the shell with the {@link SHELL_PROFILE} profile, in the same `madeFrom` shape
+ * an enchanted item uses, so "View item", receipts, export and line merging need nothing new.
+ * @param {object} params
+ * @param {object} params.base       The base item's `toObject()` data.
+ * @param {string} params.baseUuid
+ * @param {object} params.shell      The shell's `toObject()` data.
+ * @param {string} params.shellUuid
+ * @param {string} [params.name]     The made item's name; the shell's when omitted.
+ * @returns {object}
+ */
+export function shellItemData({ base, baseUuid, shell, shellUuid, name }) {
+  const data = structuredClone(base);
+  for ( const field of ["_id", "folder", "sort", "ownership"] ) delete data[field];
+  const profile = shellProfile(shell);
+  const properties = new Set([...listOf(data.system?.properties), ...listOf(shell.system?.properties), "mgc"]);
+  const activities = { ...(data.system?.activities ?? {}) };
+  for ( const [id, activity] of Object.entries(shell.system?.activities ?? {}) ) {
+    const emptyAttack = (activity?.type === "attack") && !valuesOf(activity.damage?.parts).length;
+    if ( !emptyAttack ) activities[id] = structuredClone(activity);
+  }
+  data.name = name || shell.name;
+  data.img = shell.img || data.img;
+  data.system = {
+    ...data.system,
+    description: { ...data.system?.description, value: shell.system?.description?.value ?? "" },
+    identifier: shell.system?.identifier || data.system?.identifier,
+    properties: [...properties],
+    attunement: shell.system?.attunement || data.system?.attunement || "",
+    activities,
+    price: cpToPriceParts(itemValueCp(data.system?.price) + enchantmentValueCp({
+      profile, consumable: data.type === "consumable"
+    }))
+  };
+  // dnd5e 6.0.2 keeps a `rarities` set where earlier versions keep one `rarity`; write the shape the
+  // base item's own data uses.
+  const key = profile.rarity ? (SYSTEM_RARITY[profile.rarity] ?? profile.rarity) : "";
+  if ( "rarities" in (base.system ?? {}) ) data.system.rarities = key ? [key] : [];
+  else data.system.rarity = key;
+  data.effects = [...valuesOf(data.effects), ...valuesOf(shell.effects).map(e => structuredClone(plain(e)))];
+  data._stats = { ...data._stats, compendiumSource: baseUuid ?? null };
+  data.flags = {
+    ...data.flags,
+    [MODULE_ID]: {
+      ...data.flags?.[MODULE_ID],
+      madeFrom: { template: shellUuid, profile: SHELL_PROFILE, base: baseUuid ?? "" }
+    }
+  };
+  return data;
+}
+
+/**
+ * The creation data for one choice on one base: an enchanted item, or a shell made real.
+ * @param {object} params
+ * @param {object} params.template   The template's or shell's `toObject()` data.
+ * @param {string} params.templateUuid
+ * @param {{profile: EnchantProfile, bases: BaseSummary[]}} params.choice
+ * @param {object} params.base       The chosen base's `toObject()` data.
+ * @param {string} params.baseUuid
+ * @returns {object}
+ */
+export function madeItemData({ template, templateUuid, choice, base, baseUuid }) {
+  if ( choice.profile.key === SHELL_PROFILE ) {
+    const summary = choice.bases.find(b => b.uuid === baseUuid) ?? { name: base.name };
+    return shellItemData({
+      base, baseUuid, shell: template, shellUuid: templateUuid, name: shellName(template, summary, choice.bases.length)
+    });
+  }
+  return enchantedItemData({ base, baseUuid, template, templateUuid, profile: choice.profile });
 }
 
 /**
@@ -354,7 +532,8 @@ export function madeIdentity(madeFrom) {
 }
 
 /**
- * The generator pool entries a template contributes: one per enchantment that has a base to go on.
+ * The generator pool entries a template or shell contributes: one per enchantment that has a base to
+ * go on (a shell has the one).
  *
  * Each is priced from the **cheapest** eligible base, so a price ceiling admits it whenever at least
  * one version would fit; the base is then chosen within the ceiling when the item is made.
@@ -364,14 +543,13 @@ export function madeIdentity(madeFrom) {
  * @param {string} params.pack
  * @param {string} params.packLabel
  * @param {BaseSummary[]} params.bases
+ * @param {BaseSummary[]} [params.linked]  The bases its headline links, resolved.
  * @returns {object[]}  Pool entries with `kind: "enchant"`.
  */
-export function templateEntries({ template, uuid, pack = "", packLabel = "", bases }) {
+export function templateEntries({ template, uuid, pack = "", packLabel = "", bases, linked = [] }) {
   const out = [];
-  for ( const profile of enchantProfiles(template) ) {
-    const type = baseTypeFor(profile, template);
-    const eligible = eligibleBases(profile, type, bases);
-    if ( !eligible.length ) continue;
+  for ( const { profile, bases: eligible } of templateBaseChoices({ template, bases, linked }) ) {
+    const type = eligible[0].type;
     const cheapest = Math.min(...eligible.map(b => b.valueCp));
     out.push({
       kind: "enchant",
@@ -428,6 +606,8 @@ let baseCache = null;
 /** The templates the last pool expansion found something to make from, for the manager's picker. */
 let lastTemplates = [];
 let templateCache = new Map();
+/** Summaries of linked bases that are not dnd5e base items, by uuid; null for one that is gone. */
+let linkedCache = new Map();
 let spellCache = null;
 
 /**
@@ -455,7 +635,7 @@ export function templateCacheStats() {
   for ( const doc of templateCache.values() ) {
     if ( !doc ) continue;
     held++;
-    if ( !isHollowTemplate(doc) ) stray++;
+    if ( !isMakeable(doc) ) stray++;
   }
   return { checked: templateCache.size, held, stray };
 }
@@ -464,6 +644,7 @@ export function templateCacheStats() {
 export function clearEnchantCaches() {
   baseCache = null;
   templateCache = new Map();
+  linkedCache = new Map();
   spellCache = null;
 }
 
@@ -518,34 +699,77 @@ export async function baseItems() {
     .filter(v => typeof v === "string" && v)
     .map(v => (v.includes(".") ? v : `Compendium.${itemsPack}.Item.${v}`));
   const docs = await loadByUuid(uuids);
-  baseCache = [...docs.entries()].map(([uuid, doc]) => ({
+  baseCache = [...docs.entries()].map(([uuid, doc]) => ({ ...baseSummary(uuid, doc), doc }))
+    .sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang));
+  return baseCache;
+}
+
+/**
+ * A base item as the matching rules read it.
+ * @param {string} uuid
+ * @param {object} doc
+ * @returns {BaseSummary}
+ */
+function baseSummary(uuid, doc) {
+  return {
     uuid,
     name: doc.name,
     img: doc.img,
     type: doc.type,
     subtype: typeof doc.system?.type?.value === "string" ? doc.system.type.value : "",
     properties: listOf(doc.system?.properties),
-    valueCp: itemValueCp(doc.system?.price),
-    doc
-  })).sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang));
-  return baseCache;
+    damageTypes: listOf(doc.system?.damage?.base?.types),
+    valueCp: itemValueCp(doc.system?.price)
+  };
 }
 
 /**
- * Load a template and describe what can be made from it: each enchantment with the bases it fits.
- * Empty for anything that is not a hollow template.
+ * The bases a template's headline links, resolved. Most are dnd5e's own base items and are taken
+ * from {@link baseItems}; the rest (the Wand a wand template links) are loaded.
+ * @param {object} template
+ * @param {BaseSummary[]} bases  From {@link baseItems}.
+ * @param {object} [options]
+ * @param {boolean} [options.keepDocs=true]  Keep each document on its summary, which making an item
+ *   needs. The generator's pool only prices, so it leaves them off rather than pin them in memory.
+ * @returns {Promise<BaseSummary[]>}  In the headline's order; unresolvable links left out.
+ */
+async function linkedBases(template, bases, { keepDocs = true } = {}) {
+  const uuids = linkedBaseUuids(template);
+  if ( !uuids.length ) return [];
+  const known = new Map(bases.map(b => [b.uuid, b]));
+  const missing = uuids.filter(uuid => !known.has(uuid) && !linkedCache.has(uuid));
+  if ( missing.length ) {
+    const docs = await loadByUuid(missing);
+    for ( const uuid of missing ) {
+      const doc = docs.get(uuid);
+      linkedCache.set(uuid, doc ? baseSummary(uuid, doc) : null);
+    }
+  }
+  const out = [];
+  for ( const uuid of uuids ) {
+    let base = known.get(uuid) ?? linkedCache.get(uuid);
+    if ( keepDocs && base && !base.doc ) {
+      const doc = await fromUuid(uuid).catch(() => null);
+      base = doc ? { ...base, doc } : null;
+    }
+    if ( base ) out.push(base);
+  }
+  return out;
+}
+
+/**
+ * Load a template or shell and describe what can be made from it: each enchantment with the bases it
+ * fits. Empty for anything that is neither.
  * @param {object|string} template  A document or a uuid.
  * @returns {Promise<{template: object, uuid: string, choices: {profile: EnchantProfile, bases: BaseSummary[]}[]}>}
  */
 export async function templateChoices(template) {
   const doc = typeof template === "string" ? await fromUuid(template).catch(() => null) : template;
   const uuid = doc?.uuid ?? "";
-  if ( !doc || !isHollowTemplate(doc) ) return { template: doc, uuid, choices: [] };
+  if ( !doc || !isMakeable(doc) ) return { template: doc, uuid, choices: [] };
   const bases = await baseItems();
-  const choices = enchantProfiles(doc)
-    .map(profile => ({ profile, bases: eligibleBases(profile, baseTypeFor(profile, doc), bases) }))
-    .filter(choice => choice.bases.length);
-  return { template: doc, uuid, choices };
+  const linked = isHollowTemplate(doc) ? await linkedBases(doc, bases) : [];
+  return { template: doc, uuid, choices: templateBaseChoices({ template: doc, bases, linked }) };
 }
 
 /**
@@ -560,18 +784,14 @@ export async function makeEnchantedData({ template, profileKey, baseUuid }) {
   const { template: doc, uuid, choices } = await templateChoices(template);
   const choice = choices.find(c => c.profile.key === profileKey);
   const base = choice?.bases.find(b => b.uuid === baseUuid);
-  if ( !doc || !choice || !base ) return null;
-  return enchantedItemData({
-    base: base.doc.toObject(),
-    baseUuid: base.uuid,
-    template: doc.toObject(),
-    templateUuid: uuid,
-    profile: choice.profile
+  if ( !doc || !choice || !base?.doc ) return null;
+  return madeItemData({
+    template: doc.toObject(), templateUuid: uuid, choice, base: base.doc.toObject(), baseUuid: base.uuid
   });
 }
 
 /**
- * Build a random finished item from a template: a random enchantment, on a random base that fits.
+ * Build a random finished item from a template or shell: a random enchantment, on a random base that fits.
  * What a roll table or an API call gets, where nobody is there to choose.
  * @param {object|string} template
  * @param {object} [options]
@@ -586,14 +806,15 @@ export async function makeRandomEnchantedData(template, { rng = Math.random, cat
   const usable = choices.filter(c => !profileKey || c.profile.key === profileKey);
   // Tried in a random order, so a ceiling that excludes one enchantment falls through to another.
   const order = [...usable].sort(() => rng() - 0.5);
-  for ( const { profile, bases } of order ) {
+  for ( const choice of order ) {
+    const { profile, bases } = choice;
     const enchantCp = enchantmentValueCp({
-      profile, templateValueCp: itemValueCp(doc.system?.price), consumable: baseTypeFor(profile, doc) === "consumable"
+      profile, templateValueCp: itemValueCp(doc.system?.price), consumable: bases[0]?.type === "consumable"
     });
     const base = pickBase({ eligible: bases, categories, maxValueCp, enchantCp, rng });
-    if ( !base ) continue;
-    return enchantedItemData({
-      base: base.doc.toObject(), baseUuid: base.uuid, template: doc.toObject(), templateUuid: uuid, profile
+    if ( !base?.doc ) continue;
+    return madeItemData({
+      template: doc.toObject(), templateUuid: uuid, choice, base: base.doc.toObject(), baseUuid: base.uuid
     });
   }
   return null;
@@ -680,7 +901,7 @@ export async function scrollEntries() {
         img: blank.img,
         type: "consumable",
         subtype: "scroll",
-        rarity: normalizeRarity(blank.system?.rarity),
+        rarity: itemRarity(blank),
         valueCp: itemValueCp(blank.system?.price),
         pack: "",
         packLabel: ""
@@ -709,24 +930,24 @@ export function mightBeTemplate(entry) {
 }
 
 /**
- * The stock generator's pool: the compendium pool with hollow templates and blank scrolls swapped
- * for what can really be made from them.
+ * The stock generator's pool: the compendium pool with hollow templates, shells and blank scrolls
+ * swapped for what can really be made from them.
  * @param {object[]} pool  From `item-index.mjs#itemPool`.
  * @returns {Promise<object[]>}
  */
 export async function expandPool(pool) {
   lastTemplates = [];
-  const candidates = pool.filter(mightBeTemplate);
+  const candidates = pool.filter(entry => mightBeTemplate(entry) || entry.shellCandidate);
   const bases = candidates.length ? await baseItems() : [];
   const missing = candidates.map(e => e.uuid).filter(uuid => !templateCache.has(uuid));
   if ( missing.length ) {
-    // Only a hollow template is kept. Most candidates are finished magic items the index could not
-    // rule out, and holding their whole documents for the session pins them in memory long after
-    // Foundry's own compendium cache would have let them go. A null still records "looked, not one".
+    // Only a hollow template or a shell is kept. Most candidates are finished magic items the index
+    // could not rule out, and holding their whole documents for the session pins them in memory long
+    // after Foundry's own compendium cache would have let them go. A null still records "looked, not one".
     const docs = await loadByUuid(missing);
     for ( const uuid of missing ) {
       const doc = docs.get(uuid);
-      templateCache.set(uuid, doc && isHollowTemplate(doc) ? doc : null);
+      templateCache.set(uuid, doc && isMakeable(doc) ? doc : null);
     }
   }
 
@@ -735,7 +956,10 @@ export async function expandPool(pool) {
   for ( const entry of candidates ) {
     const doc = templateCache.get(entry.uuid);
     if ( !doc ) continue;
-    const entries = templateEntries({ template: doc, uuid: entry.uuid, pack: entry.pack, packLabel: entry.packLabel, bases });
+    const linked = isHollowTemplate(doc) ? await linkedBases(doc, bases, { keepDocs: false }) : [];
+    const entries = templateEntries({
+      template: doc, uuid: entry.uuid, pack: entry.pack, packLabel: entry.packLabel, bases, linked
+    });
     replaced.add(entry.uuid);
     made.push(...entries);
     if ( entries.length ) lastTemplates.push({ uuid: entry.uuid, name: doc.name, packLabel: entry.packLabel });

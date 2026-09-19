@@ -200,7 +200,7 @@ export function exportFileName(name) {
 /** Only the string fields a made item records, so a hand-edited file cannot smuggle anything else in. */
 function sanitizeMadeFrom(raw) {
   const out = {};
-  for ( const key of ["template", "profile", "base", "spell"] ) {
+  for ( const key of ["template", "profile", "base", "spell", "attunement"] ) {
     if ( typeof raw[key] === "string" && raw[key] ) out[key] = raw[key];
   }
   return out;

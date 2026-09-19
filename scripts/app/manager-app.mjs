@@ -1,5 +1,5 @@
 import {
-  MODULE_ID, PHYSICAL_TYPES, PRICING_PRESETS, SETTINGS, maxStockLines, normalizeRarity, setting, tpl, t, log
+  MODULE_ID, PHYSICAL_TYPES, PRICING_PRESETS, SETTINGS, itemRarity, maxStockLines, setting, tpl, t, log
 } from "../config.mjs";
 import { attitudeTier } from "../data/attitude.mjs";
 import { RESTOCK_MODES, daysUntilRestock } from "../data/restock.mjs";
@@ -22,7 +22,7 @@ import {
   traderData
 } from "../data/trader.mjs";
 import {
-  enchantmentValueCp, isHollowTemplate, makeEnchantedData, makeScrollData, templateCatalogue,
+  enchantmentValueCp, isMakeable, makeEnchantedData, makeScrollData, templateCatalogue,
   templateChoices
 } from "../data/enchant.mjs";
 import { itemPool } from "../data/item-index.mjs";
@@ -590,7 +590,7 @@ export class TraderManagerApp extends ShopShellBase {
         name: item.name,
         img: item.img,
         type: item.type,
-        rarity: normalizeRarity(item.system?.rarity),
+        rarity: itemRarity(item),
         quantity: item.system?.quantity ?? 0,
         unlimited: line.unlimited,
         // The row's own toggle means nothing while the Trader makes everything unlimited, so it is
@@ -664,7 +664,7 @@ export class TraderManagerApp extends ShopShellBase {
     const templates = [];
     for ( const uuid of selected ) {
       const item = await fromUuid(uuid).catch(() => null);
-      if ( item && isHollowTemplate(item) ) templates.push(item);
+      if ( item && isMakeable(item) ) templates.push(item);
       else plain.push(uuid);
     }
     if ( plain.length ) this.#reportAdded(await addStockItems(trader, plain, { synthesize: false }));
@@ -1291,8 +1291,8 @@ export class TraderManagerApp extends ShopShellBase {
     if ( !PHYSICAL_TYPES.includes(item.type) ) {
       return void ui.notifications.warn(t("manager.stock.dropNotPhysical", { name: item.name }));
     }
-    // A DMG template asks what to make from it.
-    if ( isHollowTemplate(item) ) {
+    // A DMG template, or a shell, asks what to make from it.
+    if ( isMakeable(item) ) {
       await this.#stockTemplate(trader, item);
       return;
     }

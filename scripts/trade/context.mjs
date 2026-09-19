@@ -1,5 +1,5 @@
 import {
-  HOOKS, SETTINGS, fireCancellableHook, log, normalizeRarity, pricingAnchors, setting, t
+  HOOKS, MODULE_ID, SETTINGS, fireCancellableHook, itemRarity, log, pricingAnchors, setting, t
 } from "../config.mjs";
 import { attitudeTier } from "../data/attitude.mjs";
 import { HAGGLE_SKILLS, haggleDc, haggleEdge, isHaggleLocked } from "../data/haggle.mjs";
@@ -16,6 +16,7 @@ import {
 import {
   getAttitude, haggleRecordFor, ledgerOf, purse, stockEntries, stockLimit, traderData
 } from "../data/trader.mjs";
+import { proficiencyMaps, usabilityNotes, usabilityProfile } from "../data/usability.mjs";
 import { QUERIES, defineQuery } from "./queries.mjs";
 
 /**
@@ -182,7 +183,7 @@ export function buildShopContext(trader, actor, { payer = actor, user = game.use
     // Why the multipliers are what they are, for the shop's price breakdown.
     pricing: pricingView({ chaMod, attitude, multipliers }),
     haggle: haggleView(trader, actor, attitude),
-    stock: visibleStock(trader, attitude, multipliers, fixedValue),
+    stock: visibleStock(trader, attitude, multipliers, fixedValue, actor),
     pack: sellableInventory(trader, actor, multipliers, fixedValue)
   };
 }
@@ -328,9 +329,15 @@ export function formatWorldTime(worldTime) {
  * Filtered *here*, on the GM's client — see the class comment. An unpriced line is dropped
  * too: it cannot be bought, and showing a shelf item with no price only invites a click that
  * does nothing.
+ *
+ * Each line also says, in words, what would stop this character using it — no proficiency, too
+ * little Strength, an attunement limited to someone else (`data/usability.mjs`). Worked out here
+ * because the character's sheet is the GM's to read, not the Trader's shelf the player's.
  * @returns {object[]}
  */
-function visibleStock(trader, attitude, multipliers, fixedValue) {
+function visibleStock(trader, attitude, multipliers, fixedValue, actor) {
+  const character = usabilityProfile(actor);
+  const maps = character ? proficiencyMaps() : null;
   const out = [];
   for ( const { id, item, line } of stockEntries(trader) ) {
     if ( !lineVisible(line, attitude) ) continue;
@@ -353,7 +360,7 @@ function visibleStock(trader, attitude, multipliers, fixedValue) {
       img: item.img,
       type: item.type,
       subtype: subtypeOf(item),
-      rarity: normalizeRarity(item.system?.rarity),
+      rarity: itemRarity(item),
       // `Infinity` does not survive JSON, so an unlimited line says so with a flag and a
       // quantity the UI never shows.
       unlimited: qty === Infinity,
@@ -361,9 +368,24 @@ function visibleStock(trader, attitude, multipliers, fixedValue) {
       valueCp,
       fixed,
       buyCp,
-      price: formatCp(buyCp)
+      price: formatCp(buyCp),
+      warnings: usabilityWarnings(usabilityNotes(item, character, maps, item.flags?.[MODULE_ID]?.madeFrom))
     });
   }
+  return out;
+}
+
+/**
+ * A line's usability notes as the words its tile shows.
+ * @param {import("../data/usability.mjs").UsabilityNotes|null} notes
+ * @returns {string[]}  Empty when there is nothing to warn about.
+ */
+function usabilityWarnings(notes) {
+  if ( !notes ) return [];
+  const out = [];
+  if ( notes.notProficient ) out.push(t("shop.usable.notProficient"));
+  if ( notes.needsStrength ) out.push(t("shop.usable.needsStrength", { score: notes.needsStrength }));
+  if ( notes.attunementBy ) out.push(t("shop.usable.attunementBy", { who: notes.attunementBy }));
   return out;
 }
 
@@ -412,7 +434,7 @@ function sellableInventory(trader, actor, multipliers, fixedValue) {
       img: item.img,
       type: item.type,
       subtype: subtypeOf(item),
-      rarity: normalizeRarity(item.system?.rarity),
+      rarity: itemRarity(item),
       qty,
       valueCp,
       fixed,

@@ -261,7 +261,10 @@ export class ShopApp extends ShopShellBase {
       // a sold item reaches the Trader unequipped and unattuned.
       equipped: !!line.equipped,
       attuned: !!line.attuned,
-      statusNote: this.#statusNote(line)
+      statusNote: this.#statusNote(line),
+      // What would stop this character using a shelf item, worked out by the GM (`trade/context.mjs`).
+      // Advice, not a refusal: the tile stays as buyable as it was.
+      warningNote: (line.warnings ?? []).join(" · ")
     };
   }
 

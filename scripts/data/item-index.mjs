@@ -1,5 +1,6 @@
-import { PHYSICAL_TYPES, log, normalizeRarity } from "../config.mjs";
+import { PHYSICAL_TYPES, itemRarity, log } from "../config.mjs";
 import { itemValueCp } from "./pricing.mjs";
+import { mightBeShell } from "./template-bases.mjs";
 
 /**
  * The pool of stockable items across every compendium the world can see.
@@ -17,10 +18,13 @@ import { itemValueCp } from "./pricing.mjs";
 
 /** Index fields the pool needs beyond name/img/type, which every index carries anyway. */
 const INDEX_FIELDS = new Set([
-  "system.price", "system.rarity", "system.type", "system.quantity",
+  "system.price", "system.rarity", "system.rarities", "system.type", "system.quantity",
   // Both small, and both needed to tell a DMG magic item template or a blank spell scroll from the
   // finished article without loading every document — see `data/enchant.mjs#mightBeTemplate`.
-  "system.properties", "system.identifier"
+  "system.properties", "system.identifier",
+  // Two numbers that tell a *shell* (a magic weapon or armour with nothing underneath it) from the
+  // finished article — see `data/template-bases.mjs#mightBeShell`.
+  "system.damage.base.denomination", "system.armor.value"
 ]);
 
 /**
@@ -52,6 +56,7 @@ export function clearIndexCache() {
  * @property {string} packLabel  The pack's title, for the GM's source filter.
  * @property {string[]} properties  The item's property keys ("mgc" for magical).
  * @property {string} identifier    The system's `system.identifier`, or "".
+ * @property {boolean} shellCandidate  Whether it might be a shell, and so needs loading to tell.
  */
 
 /**
@@ -106,12 +111,13 @@ function toPoolEntry(entry) {
     img: entry.img ?? "icons/svg/item-bag.svg",
     type: entry.type,
     subtype: typeof entry.system?.type?.value === "string" ? entry.system.type.value : "",
-    rarity: normalizeRarity(entry.system?.rarity),
+    rarity: itemRarity(entry),
     valueCp: itemValueCp(entry.system?.price),
     pack,
     packLabel: game.packs.get(pack)?.title ?? pack,
     properties: [...(entry.system?.properties ?? [])].filter(p => typeof p === "string"),
-    identifier: typeof entry.system?.identifier === "string" ? entry.system.identifier : ""
+    identifier: typeof entry.system?.identifier === "string" ? entry.system.identifier : "",
+    shellCandidate: mightBeShell(entry)
   };
 }
 

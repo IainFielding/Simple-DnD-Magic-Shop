@@ -401,6 +401,11 @@
       "equipped": "Equipped",
       "attuned": "Attuned",
       "loseStatus": "{status} now; it will not be when sold.",
+      "usable": {
+        "notProficient": "You are not proficient with this",
+        "needsStrength": "Needs Strength {score}",
+        "attunementBy": "Only {who} can attune to this"
+      },
       "breakdown": {
         "caption": "Where the price comes from",
         "listValue": "List value",
