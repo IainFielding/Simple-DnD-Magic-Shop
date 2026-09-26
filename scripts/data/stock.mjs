@@ -1,5 +1,5 @@
 import {
-  FIXED_VALUE_LOOT, MODULE_ID, PHYSICAL_TYPES, RARITIES, clamp, maxStockLines, normalizeRarity
+  FIXED_VALUE_LOOT, MODULE_ID, PHYSICAL_TYPES, RARITIES, clamp, itemRarity, maxStockLines
 } from "../config.mjs";
 import { copperPerUnit, itemValueCp, toCopper } from "./pricing.mjs";
 
@@ -263,7 +263,7 @@ export function sanitizeBuyFilter(raw) {
  * @returns {string}
  */
 export function rarityToken(item) {
-  return normalizeRarity(item?.system?.rarity) || MUNDANE;
+  return itemRarity(item) || MUNDANE;
 }
 
 /**

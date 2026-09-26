@@ -1,5 +1,5 @@
 import { PHYSICAL_TYPES } from "../config.mjs";
-import { isHollowTemplate } from "./enchant.mjs";
+import { isMakeable } from "./enchant.mjs";
 
 /**
  * Stocking a whole folder, or a whole pack, in one drop.
@@ -56,7 +56,7 @@ export function sortDropped(items) {
     if ( !item || isContained(item) ) continue;
     if ( item.type === "spell" ) sorted.spells.push(item);
     else if ( !PHYSICAL_TYPES.includes(item.type) ) sorted.skipped.push(item);
-    else if ( isHollowTemplate(item) ) sorted.templates.push(item);
+    else if ( isMakeable(item) ) sorted.templates.push(item);
     else sorted.plain.push(item);
   }
   return sorted;

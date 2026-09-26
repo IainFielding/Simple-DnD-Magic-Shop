@@ -59,6 +59,25 @@ export function normalizeRarity(raw) {
   return RARITIES.includes(key) ? key : "";
 }
 
+/**
+ * An item's rarity, normalised, from whichever shape its data is in.
+ *
+ * dnd5e 6.0.2 replaced `system.rarity` with a `system.rarities` set (so one item can read "Uncommon
+ * (+1), Rare (+2)…"), keeping `rarity` only as a getter for the first. A live document answers
+ * either; its `toObject()` data and a migrated compendium index carry only `rarities`, while an
+ * unmigrated pack on disk still carries `rarity`. Reading `system.rarity` alone off an index is what
+ * made every item look mundane to the generator on 6.0.2 and later.
+ * @param {object} item  A document, its data, or an index entry.
+ * @returns {string}  A key from {@link RARITIES}, or "".
+ */
+export function itemRarity(item) {
+  const direct = normalizeRarity(item?.system?.rarity);
+  if ( direct ) return direct;
+  const many = item?.system?.rarities;
+  const first = (many && (typeof many !== "string")) ? [...many][0] : many;
+  return normalizeRarity(first);
+}
+
 /* -------------------------------------------- */
 /*  Public hook surface                         */
 /* -------------------------------------------- */

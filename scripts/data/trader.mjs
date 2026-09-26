@@ -8,7 +8,7 @@ import {
   defaultBuyFilter, defaultLine, sanitizeBuyFilter, sanitizeLine, stockKey, stockRoom, transferData
 } from "./stock.mjs";
 import {
-  expandPool, isHollowTemplate, madeIdentity, makeRandomEnchantedData, makeScrollData, materialise
+  expandPool, isMakeable, madeIdentity, makeRandomEnchantedData, makeScrollData, materialise
 } from "./enchant.mjs";
 import { serialised } from "./serial.mjs";
 import { appendEntry, sanitizeLedger } from "./ledger.mjs";
@@ -404,7 +404,7 @@ export async function addStockItems(actor, uuids, { qty = 1, line = {}, synthesi
     // A DMG template ("Weapon, +1, +2, or +3") is made into a real item at random when nobody is
     // there to choose. The manager asks the GM instead, through `addMadeStock`. A template with no
     // base the system can put it on is stocked as it is, which is no worse than before.
-    if ( synthesize && isHollowTemplate(item) ) {
+    if ( synthesize && isMakeable(item) ) {
       const data = await makeRandomEnchantedData(item, { rng });
       if ( data ) {
         sources.push({ data });

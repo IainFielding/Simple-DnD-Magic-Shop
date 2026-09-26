@@ -37,6 +37,10 @@
     equipped    the character is wearing or wielding it (pack tiles only)
     attuned     the character is attuned to it (pack tiles only)
     statusNote  both of those in words, for the label — the icons are not the only cue
+    warningNote what would stop the character using it (stock tiles only): no proficiency, too
+                little Strength, attunement limited to someone else. In words, joined; "" when
+                there is nothing to say. Shown as a caution badge with its own tooltip, and read
+                out in the label
 --}}
 <li class="shop-tile{{#if rarity}} rarity-{{rarity}}{{/if}}{{#if staged}} is-staged{{/if}}{{#if blocked}} is-blocked{{/if}}{{#if exhausted}} is-exhausted{{/if}}"
     data-item-id="{{id}}" data-uuid="{{uuid}}" data-source-uuid="{{sourceUuid}}" data-name="{{name}}"
@@ -45,7 +49,7 @@
   <button type="button" class="shop-tile-button" data-item-id="{{id}}"
           {{#if blocked}}disabled{{else}}{{#unless exhausted}}draggable="true"{{/unless}}{{/if}}
           {{#if blocked}}data-tooltip="{{blockedWhy}}"{{else}}data-tooltip="{{shopItemTooltip uuid}}"{{/if}}
-          aria-label="{{name}}{{#if price}} — {{price}}{{/if}}{{#if statusNote}} — {{statusNote}}{{/if}}{{#if exhaustedNote}} — {{exhaustedNote}}{{/if}}">
+          aria-label="{{name}}{{#if price}} — {{price}}{{/if}}{{#if statusNote}} — {{statusNote}}{{/if}}{{#if warningNote}} — {{warningNote}}{{/if}}{{#if exhaustedNote}} — {{exhaustedNote}}{{/if}}">
     <img class="shop-tile-img" src="{{img}}" alt="" draggable="false">
 
     {{#if unlimited}}
@@ -64,6 +68,12 @@
     <span class="shop-tile-status" aria-hidden="true">
       {{#if equipped}}<i class="fa-solid fa-shield-halved"></i>{{/if}}
       {{#if attuned}}<i class="fa-solid fa-sun"></i>{{/if}}
+    </span>
+    {{/if}}
+
+    {{#if warningNote}}
+    <span class="shop-tile-caution" data-tooltip="{{warningNote}}" aria-hidden="true">
+      <i class="fa-solid fa-triangle-exclamation"></i>
     </span>
     {{/if}}
   </button>
